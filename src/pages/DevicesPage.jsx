@@ -1,30 +1,47 @@
 // src/pages/DevicesPage.jsx
-
-import { useState, Fragment } from 'react'; // <-- ДОБАВИЛ Fragment
+import { useState, useMemo } from 'react';
 import {
-    Search, Filter, Wifi, WifiOff,
-    Thermometer, Droplets, Battery, ChevronDown, ChevronUp, Building, ArrowUpDown
+    Search, Filter, ChevronDown, WifiOff, ArrowUpDown, Server, MapPin, Hash
 } from 'lucide-react';
 import { format } from 'date-fns';
+import { useNavigate } from 'react-router-dom';
 import { useSensorStore } from '../store/sensorStore';
-import { ASSETS } from '../lib/sensorData';
+import { CITIES } from '../lib/sensorData';
+
+const StatusBadge = ({ status }) => {
+    if (status === 'danger') {
+        return (
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold border border-red-500/30 bg-red-500/10 text-red-500 whitespace-nowrap w-fit">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span>
+                CRITICAL
+            </div>
+        );
+    }
+    if (status === 'offline') {
+        return (
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold border border-gray-600 bg-gray-500/10 text-gray-500 whitespace-nowrap w-fit">
+                <WifiOff size={10} />
+                OFFLINE
+            </div>
+        );
+    }
+    return (
+        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold border border-[var(--color-success)]/30 bg-[rgba(0,255,157,0.1)] text-[var(--color-success)] whitespace-nowrap w-fit">
+            <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-success)]"></span>
+            ACTIVE
+        </div>
+    );
+};
 
 export default function DevicesPage() {
     const sensors = useSensorStore(state => state.sensors);
+    const navigate = useNavigate();
 
-    // Состояние
     const [searchQuery, setSearchQuery] = useState('');
-    const [filterStatus, setFilterStatus] = useState('all');
-    const [filterAsset, setFilterAsset] = useState('all');
-    const [expandedDeviceId, setExpandedDeviceId] = useState(null);
-
-    // Сортировка
-    const [sortConfig, setSortConfig] = useState({ key: 'lastUpdate', direction: 'desc' });
-
-    const toggleRow = (id) => {
-        if (expandedDeviceId === id) setExpandedDeviceId(null);
-        else setExpandedDeviceId(id);
-    };
+    const [selectedCityId, setSelectedCityId] = useState('all');
+    const [selectedDistrictId, setSelectedDistrictId] = useState('all');
+    const [statusFilter, setStatusFilter] = useState('all');
+    const [sortConfig, setSortConfig] = useState({ key: 't_out', direction: 'desc' });
 
     const handleSort = (key) => {
         setSortConfig(current => ({
@@ -33,234 +50,184 @@ export default function DevicesPage() {
         }));
     };
 
-    // --- ЛОГИКА ---
-    let processedSensors = sensors.filter(sensor => {
-        const isOffline = (Date.now() - new Date(sensor.lastUpdate).getTime()) > 30000;
-        const isDanger = sensor.data.temp > 24;
+    const processedSensors = useMemo(() => {
+        let result = sensors;
+        if (searchQuery) {
+            const q = searchQuery.toLowerCase();
+            result = result.filter(s => s.name.toLowerCase().includes(q) || s.id.toLowerCase().includes(q) || (s.serialNumber && s.serialNumber.toLowerCase().includes(q)));
+        }
+        if (selectedCityId !== 'all') result = result.filter(s => s.cityId === selectedCityId);
+        if (selectedDistrictId !== 'all') result = result.filter(s => s.districtId === selectedDistrictId);
+        if (statusFilter !== 'all') result = result.filter(s => s.status === statusFilter);
 
-        const matchesSearch =
-            sensor.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            sensor.locationName.toLowerCase().includes(searchQuery.toLowerCase());
+        result = [...result].sort((a, b) => {
+            let valA, valB;
+            switch (sortConfig.key) {
+                case 'name': valA = a.name; valB = b.name; break;
+                case 't_out': valA = a.telemetry.t_out; valB = b.telemetry.t_out; break;
+                case 't_in': valA = a.telemetry.t_in; valB = b.telemetry.t_in; break;
+                case 'lastUpdate': valA = a.lastUpdate; valB = b.lastUpdate; break;
+                default: valA = a.id; valB = b.id;
+            }
+            if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+            if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+            return 0;
+        });
+        return result;
+    }, [sensors, searchQuery, selectedCityId, selectedDistrictId, statusFilter, sortConfig]);
 
-        const matchesStatus = filterStatus === 'all'
-            ? true
-            : filterStatus === 'danger' ? isDanger && !isOffline
-                : filterStatus === 'offline' ? isOffline
-                    : !isDanger && !isOffline;
+    const availableDistricts = useMemo(() => {
+        if (selectedCityId === 'all') return [];
+        const city = CITIES.find(c => c.id === selectedCityId);
+        return city ? city.districts : [];
+    }, [selectedCityId]);
 
-        const matchesAsset = filterAsset === 'all' || sensor.assetId === filterAsset;
-        return matchesSearch && matchesStatus && matchesAsset;
-    });
-
-    processedSensors.sort((a, b) => {
-        let valA, valB;
-        if (sortConfig.key === 'id') { valA = a.id; valB = b.id; }
-        else if (sortConfig.key === 'temp') { valA = a.data.temp; valB = b.data.temp; }
-        else if (sortConfig.key === 'lastUpdate') { valA = new Date(a.lastUpdate).getTime(); valB = new Date(b.lastUpdate).getTime(); }
-
-        if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
-        if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
-        return 0;
-    });
+    const handleCityChange = (e) => {
+        setSelectedCityId(e.target.value);
+        setSelectedDistrictId('all');
+    };
 
     return (
-        <div className="p-8 h-full overflow-y-auto">
-
-            {/* --- ЗАГОЛОВОК --- */}
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 gap-4">
+        <div className="p-8 h-full overflow-hidden flex flex-col">
+            <div className="flex flex-col md:flex-row justify-between items-end mb-6 shrink-0">
                 <div>
-                    <h1 className="text-3xl font-bold mb-2 bg-gradient-to-r from-brand-blue to-brand-green bg-clip-text text-transparent w-fit">
-                        Устройства
+                    <h1 className="text-3xl font-bold font-mono text-white mb-2 flex items-center gap-3">
+                        <Server className="text-[var(--color-cool)]" /> SYSTEM UNITS
                     </h1>
-                    <div className="flex items-center gap-2 text-[--text-muted] text-sm">
-                        <span className="flex h-2 w-2 rounded-full bg-brand-green animate-pulse"></span>
-                        Активных систем: <span className="text-[--text-main] font-mono font-bold">{processedSensors.length}</span>
+                    <div className="text-sm text-[var(--text-muted)] font-mono flex gap-4">
+                        <span>TOTAL: <b className="text-white">{sensors.length}</b></span>
+                        <span className="text-[var(--color-success)]">ONLINE: <b>{sensors.filter(s => s.status === 'active').length}</b></span>
+                        <span className="text-[var(--color-danger)]">ERRORS: <b>{sensors.filter(s => s.status === 'danger').length}</b></span>
                     </div>
                 </div>
 
-                {/* --- ФИЛЬТРЫ --- */}
-                <div className="flex flex-wrap items-center gap-3 bg-[--surface] p-2 rounded-xl border border-[--border] shadow-lg">
+                <div className="flex flex-wrap items-center gap-3 bg-[var(--bg-panel)] p-1.5 rounded-xl border border-[var(--border-color)]">
                     <div className="relative group">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[--text-muted] group-focus-within:text-brand-blue transition-colors" size={18} />
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--color-cool)]" size={16} />
                         <input
                             type="text"
-                            placeholder="Поиск..."
+                            placeholder="Search SN, ID..."
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            className="pl-10 pr-4 py-2 bg-transparent border-none focus:outline-none text-sm w-48 text-[--text-main]"
+                            className="pl-9 pr-4 py-2 bg-transparent border-none focus:outline-none text-sm w-48 text-[var(--text-main)] placeholder:text-[var(--text-muted)]/50"
                         />
                     </div>
-                    <div className="w-[1px] h-6 bg-[--border]"></div>
+                    <div className="w-[1px] h-6 bg-[var(--border-color)]"></div>
                     <div className="relative">
-                        <select
-                            value={filterAsset}
-                            onChange={(e) => setFilterAsset(e.target.value)}
-                            className="pl-3 pr-8 py-2 bg-transparent text-sm font-medium focus:outline-none appearance-none cursor-pointer text-[--text-main]"
-                        >
-                            <option value="all" className="bg-[--bg-app]">Все объекты</option>
-                            {ASSETS.map(asset => (
-                                <option key={asset.id} value={asset.id} className="bg-[--bg-app] text-[--text-main]">{asset.name}</option>
-                            ))}
+                        <select value={selectedCityId} onChange={handleCityChange} className="pl-3 pr-8 py-2 bg-transparent text-sm font-bold focus:outline-none appearance-none cursor-pointer text-[var(--text-main)] hover:text-white">
+                            <option value="all" className="bg-[#02040a]">ALL CITIES</option>
+                            {CITIES.map(city => (<option key={city.id} value={city.id} className="bg-[#02040a]">{city.name.toUpperCase()}</option>))}
                         </select>
-                        <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 text-[--text-muted] pointer-events-none" size={14} />
+                        <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" size={12} />
                     </div>
-                    <div className="w-[1px] h-6 bg-[--border]"></div>
+                    {selectedCityId !== 'all' && (
+                        <>
+                            <div className="w-[1px] h-6 bg-[var(--border-color)]"></div>
+                            <div className="relative animate-fadeIn">
+                                <select value={selectedDistrictId} onChange={(e) => setSelectedDistrictId(e.target.value)} className="pl-3 pr-8 py-2 bg-transparent text-sm font-bold focus:outline-none appearance-none cursor-pointer text-[var(--text-main)] hover:text-white">
+                                    <option value="all" className="bg-[#02040a]">ALL DISTRICTS</option>
+                                    {availableDistricts.map(d => (<option key={d.id} value={d.id} className="bg-[#02040a]">{d.name.toUpperCase()}</option>))}
+                                </select>
+                                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" size={12} />
+                            </div>
+                        </>
+                    )}
+                    <div className="w-[1px] h-6 bg-[var(--border-color)]"></div>
                     <div className="relative">
-                        <select
-                            value={filterStatus}
-                            onChange={(e) => setFilterStatus(e.target.value)}
-                            className="pl-3 pr-8 py-2 bg-transparent text-sm font-medium focus:outline-none appearance-none cursor-pointer text-[--text-main]"
-                        >
-                            <option value="all" className="bg-[--bg-app]">Все статусы</option>
-                            <option value="good" className="bg-[--bg-app]">Норма</option>
-                            <option value="danger" className="bg-[--bg-app]">Тревога</option>
-                            <option value="offline" className="bg-[--bg-app]">Не активные</option>
+                        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="pl-3 pr-8 py-2 bg-transparent text-sm font-bold focus:outline-none appearance-none cursor-pointer text-[var(--text-main)] hover:text-white">
+                            <option value="all" className="bg-[#02040a]">ALL STATUS</option>
+                            <option value="active" className="bg-[#02040a]">ACTIVE</option>
+                            <option value="danger" className="bg-[#02040a]">CRITICAL</option>
+                            <option value="offline" className="bg-[#02040a]">OFFLINE</option>
                         </select>
-                        <Filter className="absolute right-2 top-1/2 -translate-y-1/2 text-[--text-muted] pointer-events-none" size={12} />
+                        <Filter className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" size={12} />
                     </div>
                 </div>
             </div>
 
-            {/* --- ТАБЛИЦА --- */}
-            <div className="glass-panel rounded-2xl overflow-hidden shadow-2xl border border-[--border]">
-                <table className="w-full text-left border-collapse">
-                    <thead>
-                    <tr className="border-b border-[--border] bg-[--surface-hover]/30 text-[--text-muted] text-xs uppercase tracking-wider">
-                        <th className="p-5 w-12"></th>
-                        <th className="p-5 font-semibold cursor-pointer hover:text-[--text-main]" onClick={() => handleSort('id')}>
-                            Статус <ArrowUpDown size={10} className="inline ml-1"/>
-                        </th>
-                        <th className="p-5 font-semibold cursor-pointer hover:text-[--text-main]" onClick={() => handleSort('id')}>
-                            ID / Локация <ArrowUpDown size={10} className="inline ml-1"/>
-                        </th>
-                        <th className="p-5 font-semibold cursor-pointer hover:text-[--text-main]" onClick={() => handleSort('temp')}>
-                            Телеметрия <ArrowUpDown size={10} className="inline ml-1"/>
-                        </th>
-                        <th className="p-5 font-semibold text-right cursor-pointer hover:text-[--text-main]" onClick={() => handleSort('lastUpdate')}>
-                            Обновление <ArrowUpDown size={10} className="inline ml-1"/>
-                        </th>
-                    </tr>
-                    </thead>
-                    <tbody className="text-sm divide-y divide-[--border]">
+            <div className="flex-1 overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--bg-panel)] backdrop-blur-sm relative">
+                <div className="absolute top-0 left-0 right-0 h-12 bg-[#02040a]/80 border-b border-[var(--border-color)] flex items-center px-4 text-xs font-mono text-[var(--text-muted)] uppercase tracking-wider z-10">
+                    <div className="w-24">Status</div> {/* КОЛОНКА 1 */}
+                    <div className="w-32">Serial No</div> {/* КОЛОНКА 2 */}
+                    <div className="flex-1 cursor-pointer hover:text-white flex items-center gap-1" onClick={() => handleSort('name')}>
+                        Unit Info / Location <ArrowUpDown size={10} />
+                    </div>
+                    <div className="w-32 text-right cursor-pointer hover:text-white flex items-center justify-end gap-1" onClick={() => handleSort('t_out')}>
+                        Feed Temp <ArrowUpDown size={10} />
+                    </div>
+                    <div className="w-32 text-right cursor-pointer hover:text-white flex items-center justify-end gap-1" onClick={() => handleSort('t_in')}>
+                        Return <ArrowUpDown size={10} />
+                    </div>
+                    <div className="w-32 text-right cursor-pointer hover:text-white flex items-center justify-end gap-1" onClick={() => handleSort('lastUpdate')}>
+                        Updated <ArrowUpDown size={10} />
+                    </div>
+                </div>
+
+                <div className="absolute top-12 left-0 right-0 bottom-0 overflow-y-auto custom-scrollbar">
                     {processedSensors.length === 0 ? (
-                        <tr><td colSpan="5" className="p-12 text-center text-[--text-muted]">Устройства не найдены</td></tr>
+                        <div className="h-full flex items-center justify-center text-[var(--text-muted)]">NO UNITS FOUND</div>
                     ) : (
-                        processedSensors.map((sensor) => {
-                            // ПРОВЕРКА OFFLINE (30 секунд)
-                            const isOffline = (Date.now() - new Date(sensor.lastUpdate).getTime()) > 30000;
-                            const isDanger = sensor.data.temp > 24;
-                            const isExpanded = expandedDeviceId === sensor.id;
-                            const assetName = ASSETS.find(a => a.id === sensor.assetId)?.name || 'Unknown';
+                        <table className="w-full text-left border-collapse">
+                            <tbody>
+                            {processedSensors.map((sensor) => (
+                                <tr key={sensor.id} onClick={() => navigate(`/devices/${sensor.id}`)} className="border-b border-[var(--border-color)]/50 hover:bg-white/5 transition-colors group cursor-pointer">
 
-                            const batColor = sensor.data.battery < 20 ? 'text-red-500' : sensor.data.battery < 50 ? 'text-yellow-500' : 'text-green-500';
+                                    {/* КОЛОНКА 1: СТАТУС */}
+                                    <td className="p-4 w-24 align-middle">
+                                        <StatusBadge status={sensor.status} />
+                                    </td>
 
-                            return (
-                                // ВАЖНО: Используем Fragment с ключом здесь!
-                                <Fragment key={sensor.id}>
-                                    <tr
-                                        onClick={() => toggleRow(sensor.id)}
-                                        className={`
-                                                cursor-pointer transition-all duration-200 
-                                                ${isExpanded ? 'bg-[--surface-hover] shadow-inner' : 'hover:bg-[--surface-hover]/50'}
-                                                ${isOffline ? 'opacity-60 grayscale' : ''} 
-                                            `}
-                                    >
-                                        <td className="p-5 text-[--text-muted]">
-                                            <ChevronDown size={16} className={`transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}/>
-                                        </td>
+                                    {/* КОЛОНКА 2: СЕРИЙНЫЙ НОМЕР */}
+                                    <td className="p-4 w-32 align-middle">
+                                        <div className="text-[11px] font-mono text-indigo-300 bg-indigo-500/10 px-2 py-1 rounded border border-indigo-500/20 whitespace-nowrap w-fit flex items-center gap-1">
+                                            <Hash size={10} className="opacity-50"/> {sensor.serialNumber}
+                                        </div>
+                                    </td>
 
-                                        <td className="p-5">
-                                            {isOffline ? (
-                                                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wide border bg-gray-500/10 text-gray-500 border-gray-500/20">
-                                                    <span className="w-1.5 h-1.5 rounded-full bg-gray-500"></span> OFFLINE
-                                                </div>
-                                            ) : (
-                                                <div className={`
-                                                        inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wide border
-                                                        ${isDanger
-                                                    ? 'bg-red-500/10 text-red-500 border-red-500/20'
-                                                    : 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'}
-                                                    `}>
-                                                    <span className={`w-1.5 h-1.5 rounded-full ${isDanger ? 'bg-red-500 animate-pulse' : 'bg-emerald-500'}`}></span>
-                                                    {isDanger ? 'ТРЕВОГА' : 'АКТИВЕН'}
-                                                </div>
-                                            )}
-                                        </td>
+                                    {/* КОЛОНКА 3: ИНФО */}
+                                    <td className="p-4 align-middle">
+                                        <div className="font-bold text-sm text-white group-hover:text-[var(--color-cool)] transition-colors mb-1">
+                                            {sensor.name}
+                                        </div>
+                                        <div className="flex items-center gap-2 text-xs text-[var(--text-muted)] font-mono">
+                                            <span className="bg-white/5 px-1.5 rounded">{sensor.id}</span>
+                                            <span className="text-[var(--text-muted)]/50">|</span>
+                                            <MapPin size={10} />
+                                            {sensor.cityName}, {sensor.districtName}
+                                        </div>
+                                    </td>
 
-                                        <td className="p-5">
-                                            <div className="font-mono font-bold text-[--text-main] text-base mb-1">{sensor.id}</div>
-                                            <div className="flex items-center gap-1.5 text-xs text-[--text-muted]">
-                                                <Building size={12}/>
-                                                <span className="truncate max-w-[200px]">{assetName}</span>
-                                                <span className="opacity-50">•</span>
-                                                <span>{sensor.locationName}</span>
-                                            </div>
-                                        </td>
+                                    {/* КОЛОНКА 4: ПОДАЧА */}
+                                    <td className="p-4 text-right align-middle">
+                                        <div className={`text-xl font-mono font-bold ${sensor.status === 'offline' ? 'text-[var(--text-muted)]' : 'text-[var(--color-heat)]'}`}>
+                                            {sensor.status === 'offline' ? '--' : sensor.telemetry.t_out.toFixed(1)}°
+                                        </div>
+                                        <div className="text-[10px] text-[var(--text-muted)] uppercase">Feed</div>
+                                    </td>
 
-                                        <td className="p-5">
-                                            <div className="flex gap-6">
-                                                <div>
-                                                    <div className="text-[10px] text-[--text-muted] uppercase mb-0.5">Темп.</div>
-                                                    <div className="flex items-center gap-1 text-brand-blue font-bold font-mono text-lg">
-                                                        <Thermometer size={16}/> {sensor.data.temp}°
-                                                    </div>
-                                                </div>
-                                                <div>
-                                                    <div className="text-[10px] text-[--text-muted] uppercase mb-0.5">Влаж.</div>
-                                                    <div className="flex items-center gap-1 text-brand-green font-bold font-mono text-lg">
-                                                        <Droplets size={16}/> {sensor.data.hum}%
-                                                    </div>
-                                                </div>
-                                                <div>
-                                                    <div className="text-[10px] text-[--text-muted] uppercase mb-0.5">Bat.</div>
-                                                    <div className={`flex items-center gap-1 font-bold font-mono text-lg ${batColor}`}>
-                                                        <Battery size={16} className={sensor.data.battery < 20 ? 'animate-pulse' : ''}/> {sensor.data.battery}%
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </td>
+                                    {/* КОЛОНКА 5: ОБРАТКА */}
+                                    <td className="p-4 text-right align-middle">
+                                        <div className={`text-xl font-mono font-bold ${sensor.status === 'offline' ? 'text-[var(--text-muted)]' : 'text-[var(--color-cool)]'}`}>
+                                            {sensor.status === 'offline' ? '--' : sensor.telemetry.t_in.toFixed(1)}°
+                                        </div>
+                                        <div className="text-[10px] text-[var(--text-muted)] uppercase">Return</div>
+                                    </td>
 
-                                        <td className="p-5 text-right">
-                                            <div className="font-mono text-sm text-[--text-main]">
-                                                {format(new Date(sensor.lastUpdate), 'HH:mm:ss')}
-                                            </div>
-                                            <div className="text-[10px] text-[--text-muted]">
-                                                {format(new Date(sensor.lastUpdate), 'dd.MM.yyyy')}
-                                            </div>
-                                            {isOffline && (
-                                                <div className="text-[10px] text-red-500 font-bold mt-1">Нет связи</div>
-                                            )}
-                                        </td>
-                                    </tr>
-
-                                    {isExpanded && (
-                                        <tr className="bg-[--surface-hover]/30 shadow-inner">
-                                            <td colSpan="5" className="p-0">
-                                                <div className="p-6 pl-20 flex gap-6 overflow-x-auto">
-                                                    {sensor.history && sensor.history.length > 0 ? (
-                                                        sensor.history.slice(0, 8).map((log, idx) => (
-                                                            <div key={idx} className="min-w-[100px] p-3 rounded-lg bg-[--bg-app] border border-[--border] flex flex-col items-center">
-                                                                    <span className="text-[10px] text-[--text-muted] mb-1">
-                                                                        {format(new Date(log.timestamp), 'HH:mm:ss')}
-                                                                    </span>
-                                                                <span className="font-mono font-bold text-brand-blue">
-                                                                        {log.value}°
-                                                                    </span>
-                                                            </div>
-                                                        ))
-                                                    ) : (
-                                                        <div className="text-[--text-muted] text-sm p-4">Нет истории</div>
-                                                    )}
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    )}
-                                </Fragment>
-                            );
-                        })
+                                    {/* КОЛОНКА 6: ВРЕМЯ */}
+                                    <td className="p-4 text-right align-middle">
+                                        <div className="text-sm font-mono text-[var(--text-main)]">
+                                            {format(new Date(sensor.lastUpdate), 'HH:mm:ss')}
+                                        </div>
+                                        <div className="text-[10px] text-[var(--text-muted)]">
+                                            {format(new Date(sensor.lastUpdate), 'dd MMM')}
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))}
+                            </tbody>
+                        </table>
                     )}
-                    </tbody>
-                </table>
+                </div>
             </div>
         </div>
     );

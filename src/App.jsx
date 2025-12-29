@@ -1,17 +1,16 @@
 // src/App.jsx
 import { useEffect } from 'react';
-import { RouterProvider, createBrowserRouter, Navigate, Outlet } from 'react-router-dom';
+import { RouterProvider, createBrowserRouter, Navigate } from 'react-router-dom';
 import Layout from './components/layout/Layout';
 import DashboardPage from './pages/DashboardPage';
 import MapPage from './pages/MapPage';
 import DevicesPage from './pages/DevicesPage';
-import LoginPage from './pages/LoginPage'; // <-- Импортируем страницу входа
-
+import LoginPage from './pages/LoginPage';
+import DeviceDetailPage from './pages/DeviceDetailPage';
 import { useUIStore } from './store/uiStore';
 import { useSensorStore } from './store/sensorStore';
+import { Toaster } from './components/ui/Toaster'; // Импорт
 
-// --- ЗАЩИТНИК РОУТОВ ---
-// Если не залогинен -> кидает на /login
 const ProtectedRoute = () => {
     const isLoggedIn = useUIStore(state => state.isLoggedIn);
     return isLoggedIn ? <Layout /> : <Navigate to="/login" replace />;
@@ -20,34 +19,34 @@ const ProtectedRoute = () => {
 const router = createBrowserRouter([
     {
         path: '/login',
-        element: <LoginPage />, // Страница входа (открыта для всех)
+        element: <LoginPage />,
     },
     {
         path: '/',
-        element: <ProtectedRoute />, // Защищенная оболочка
+        element: <ProtectedRoute />,
         children: [
             { index: true, element: <DashboardPage /> },
             { path: 'map', element: <MapPage /> },
             { path: 'devices', element: <DevicesPage /> },
+            { path: 'devices/:id', element: <DeviceDetailPage /> },
         ],
     },
 ]);
 
 function App() {
     useEffect(() => {
-        useUIStore.getState().initializeTheme();
-
-        // Запускаем сенсоры только если пользователь вошел (опционально, но логично)
-        // Но пока оставим запуск всегда, чтобы данные копились
-        const initializeSensors = useSensorStore.getState().initializeSensors;
-        initializeSensors();
-
-        return () => {
-            useSensorStore.getState().stopSensorUpdates();
-        };
+        // При старте приложения запускаем поллинг данных
+        const stopPolling = useSensorStore.getState().startPolling();
+        return () => stopPolling();
     }, []);
 
-    return <RouterProvider router={router} />;
+    // ВАЖНО: Toaster должен быть частью возвращаемого JSX, но вне RouterProvider
+    return (
+        <>
+            <Toaster /> {/* <-- Вот здесь он должен быть */}
+            <RouterProvider router={router} />
+        </>
+    );
 }
 
 export default App;

@@ -1,50 +1,75 @@
-// src/store/sensorStore.js
 import { create } from 'zustand';
-
-// URL нашего локального бэкенда
-const API_URL = 'http://54.193.157.109:3001/api/sensors';
-
-let intervalId = null;
+import { generateMockSensors } from '../lib/sensorData';
 
 export const useSensorStore = create((set, get) => ({
     sensors: [],
     isLoading: false,
-    error: null,
 
-    // Новая функция: Запрос к серверу
+    // Фильтры
+    selectedCity: 'all',
+    selectedDistrict: 'all',
+
+    // =====================
+    // INIT
+    // =====================
     fetchSensors: async () => {
-        try {
-            const response = await fetch(API_URL);
-            if (!response.ok) throw new Error('Ошибка сети');
+        set({ isLoading: true });
 
-            const data = await response.json();
+        const data = generateMockSensors();
 
-            // Если сервер вернул пустой массив (данных еще нет),
-            // не обновляем состояние, чтобы не ломать UI, или обновляем на пустое.
-            // Тут мы просто обновляем состояние.
-            set({ sensors: data, error: null });
-        } catch (err) {
-            console.error("Ошибка получения данных:", err);
-            set({ error: err.message });
-        }
+        // 🔧 FIX: приводим координаты к [lng, lat]
+        const fixedData = data.map(s => ({
+            ...s,
+            coords: [s.coords[1], s.coords[0]],
+        }));
+
+        set({ sensors: fixedData, isLoading: false });
     },
 
-    // Инициализация: теперь это просто запуск таймера опроса сервера
-    initializeSensors: () => {
-        const { fetchSensors } = get();
+    // =====================
+    // STATIC UPDATE (NO RANDOM)
+    // =====================
+    updateSensorsFake: () => {
+        set(state => {
+            const newSensors = state.sensors.map(s => {
+                if (s.status === 'offline') return s;
 
-        // 1. Делаем первый запрос сразу
-        fetchSensors();
+                // фиксированное изменение (детерминированно)
+                const step = 0.1;
 
-        // 2. Запускаем интервал (опрос каждые 2 секунды)
-        if (intervalId) clearInterval(intervalId);
-        intervalId = setInterval(fetchSensors, 2000);
+                return {
+                    ...s,
+                    telemetry: {
+                        ...s.telemetry,
+                        t_out: +(s.telemetry.t_out + step).toFixed(1),
+                        t_in: +(s.telemetry.t_in + step).toFixed(1),
+                    },
+                    lastUpdate: Date.now(),
+                };
+            });
+
+            return { sensors: newSensors };
+        });
     },
 
-    stopSensorUpdates: () => {
-        if (intervalId) {
-            clearInterval(intervalId);
-            intervalId = null;
-        }
+    // =====================
+    // FILTERS
+    // =====================
+    setCityFilter: cityId =>
+        set({ selectedCity: cityId, selectedDistrict: 'all' }),
+
+    setDistrictFilter: distId =>
+        set({ selectedDistrict: distId }),
+
+    // =====================
+    // POLLING
+    // =====================
+    startPolling: () => {
+        const { fetchSensors, updateSensorsFake } = get();
+
+        if (get().sensors.length === 0) fetchSensors();
+
+        const interval = setInterval(updateSensorsFake, 2000);
+        return () => clearInterval(interval);
     },
 }));

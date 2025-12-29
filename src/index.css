@@ -1,78 +1,162 @@
-/* 1. Импортируем базовые стили Tailwind */
 @import "tailwindcss";
 
-/* 2. Конфигурируем нашу дизайн-систему через @theme */
+/* --- ШРИФТЫ --- */
 @theme {
-    /* Расширяем или переопределяем стандартные цвета, шрифты и т.д. */
-    --font-sans: "Inter", sans-serif;
+    --font-sans: "Inter", system-ui, sans-serif;
     --font-mono: "JetBrains Mono", monospace;
-
-    --color-brand-blue: #00aaff;
-    --color-brand-green: #00ff87;
-    --color-brand-red: #ff4757;
-    --color-brand-yellow: #ffc107;
 }
 
-/* 3. Создаем семантические переменные для тем */
-@layer base {
-    :root {
-        /* Светлая тема (по умолчанию) */
-        --bg-app: #e2e8f0; /* slate-200 */
-        --surface: rgba(255, 255, 255, 0.75);
-        --surface-hover: rgba(255, 255, 255, 0.9);
-        --text-main: #0f172a; /* slate-900 */
-        --text-muted: #64748b; /* slate-500 */
-        --border: rgba(148, 163, 184, 0.2);
-    }
+/* --- ЦВЕТОВАЯ ПАЛИТРА (Hardcoded variables) --- */
+:root {
+    --bg-app: #02040a;           /* Почти черный */
+    --bg-panel: #0f1623;         /* Темно-синий для карточек */
+    --bg-panel-hover: #162032;
 
-    .dark {
-        /* Темная тема */
-        --bg-app: #000000;
-        --surface: rgba(15, 23, 42, 0.6);
-        --surface-hover: rgba(30, 41, 59, 0.8);
-        --text-main: #f1f5f9; /* slate-100 */
-        --text-muted: #94a3b8; /* slate-400 */
-        --border: rgba(255, 255, 255, 0.1);
-    }
+    --border-color: rgba(56, 189, 248, 0.1); /* Еле заметная голубая граница */
+    --border-glow: rgba(56, 189, 248, 0.5);  /* Свечение при наведении */
+
+    --text-main: #f1f5f9;        /* Почти белый текст */
+    --text-muted: #64748b;       /* Серый текст */
+
+    /* Неон */
+    --color-heat: #f59e0b;       /* Оранжевый (Amber-500) */
+    --color-cool: #06b6d4;       /* Голубой (Cyan-500) */
+    --color-danger: #ef4444;     /* Красный (Red-500) */
+    --color-success: #10b981;    /* Зеленый (Emerald-500) */
 }
 
-/* 4. Применяем переменные и глобальные стили */
+/* --- БАЗА --- */
 body {
-    background-color: var(--bg-app);
+    margin: 0;
+    padding: 0;
+    background-color: var(--bg-app); /* ГАРАНТИРОВАННО ЧЕРНЫЙ */
     color: var(--text-main);
     font-family: var(--font-sans);
-    transition: background-color 0.3s ease, color 0.3s ease;
-    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+
+    /* Фоновая сетка (Grid) */
+    background-image:
+            linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    background-size: 50px 50px;
+    min-height: 100vh;
 }
 
-/* 5. Создаем кастомные компоненты/утилиты */
-@layer components {
-    .glass-panel {
-        background-color: var(--surface);
-        backdrop-filter: blur(16px);
-        -webkit-backdrop-filter: blur(16px);
-        border: 1px solid var(--border);
-        box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
-        transition: all 0.3s ease;
-    }
+/* --- СТЕКЛЯННЫЕ ПАНЕЛИ (Улучшенный контраст) --- */
+.glass-panel {
+    background-color: rgba(15, 22, 35, 0.7); /* Более темный фон, меньше прозрачности */
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border-color);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* 6. Стили для внешних библиотек (MapLibre) */
-.maplibregl-map {
-    width: 100% !important; height: 100% !important;
-    position: absolute !important; top: 0; left: 0;
+.glass-panel:hover {
+    background-color: rgba(15, 22, 35, 0.9);
+    border-color: var(--border-glow);
+    box-shadow: 0 0 20px rgba(6, 182, 212, 0.15); /* Голубое свечение */
 }
-.glass-popup .maplibregl-popup-content {
-    background-color: var(--surface) !important;
-    backdrop-filter: blur(12px) !important;
-    border: 1px solid var(--border) !important;
-    color: var(--text-main) !important;
-    border-radius: 12px !important;
+
+/* --- АНИМАЦИИ --- */
+@keyframes pulse-glow {
+    0%, 100% { opacity: 1; box-shadow: 0 0 10px var(--color-danger); }
+    50% { opacity: .7; box-shadow: 0 0 2px var(--color-danger); }
+}
+
+.animate-critical {
+    animation: pulse-glow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Скроллбар */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+::-webkit-scrollbar-track {
+    background: #02040a;
+}
+::-webkit-scrollbar-thumb {
+    background: #334155;
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #475569;
+}
+
+
+/* --- СТИЛИ ДЛЯ КАРТЫ (MAPLIBRE OVERRIDES) --- */
+
+/* Убираем стандартный фон и отступы попапа */
+.maplibregl-popup-content {
+    background: transparent !important;
+    border-radius: 0 !important;
     padding: 0 !important;
-    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3) !important;
+    box-shadow: none !important;
 }
-.glass-popup .maplibregl-popup-tip { display: none !important; }
-.glass-popup .maplibregl-popup-close-button {
-    color: var(--text-muted) !important;
-    font-size: 16px !important; padding: 5px 8px !important; outline: none !important;
+
+/* Убираем "хвостик" (стрелочку) снизу попапа, она портит вид */
+.maplibregl-popup-tip {
+    display: none !important;
+}
+
+/* Анимация появления попапа */
+.custom-popup {
+    animation: fadeInUp 0.3s ease-out forwards;
+}
+
+@keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Пульсация для маркеров */
+@keyframes marker-pulse {
+    0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+    70% { box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+
+.marker-critical {
+    animation: marker-pulse 2s infinite;
+}
+/* Добавь в конец src/index.css */
+
+@keyframes flow {
+    from { stroke-dashoffset: 30; }
+    to { stroke-dashoffset: 0; }
+}
+
+.animate-flow-slow {
+    animation: flow 2s linear infinite;
+}
+
+.animate-flow-fast {
+    animation: flow 1s linear infinite;
+}
+
+.animate-spin-slow {
+    animation: spin 3s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fadeIn {
+    animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes slideInRight {
+    from { opacity: 0; transform: translateX(100%); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+.animate-slideInRight {
+    animation: slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
