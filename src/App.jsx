@@ -9,13 +9,16 @@ import LoginPage from './pages/LoginPage';
 import DeviceDetailPage from './pages/DeviceDetailPage';
 import { useUIStore } from './store/uiStore';
 import { useSensorStore } from './store/sensorStore';
-import { Toaster } from './components/ui/Toaster'; // Импорт
+import { useRegionStore } from './store/regionStore';
+import { Toaster } from './components/ui/Toaster';
 
+// Защищенный маршрут: если нет входа — на логин
 const ProtectedRoute = () => {
     const isLoggedIn = useUIStore(state => state.isLoggedIn);
     return isLoggedIn ? <Layout /> : <Navigate to="/login" replace />;
 };
 
+// Конфигурация роутера
 const router = createBrowserRouter([
     {
         path: '/login',
@@ -23,7 +26,7 @@ const router = createBrowserRouter([
     },
     {
         path: '/',
-        element: <ProtectedRoute />,
+        element: <ProtectedRoute />, // Внутри Layout будут вложенные роуты
         children: [
             { index: true, element: <DashboardPage /> },
             { path: 'map', element: <MapPage /> },
@@ -34,16 +37,47 @@ const router = createBrowserRouter([
 ]);
 
 function App() {
-    useEffect(() => {
-        // При старте приложения запускаем поллинг данных
-        const stopPolling = useSensorStore.getState().startPolling();
-        return () => stopPolling();
-    }, []);
+    // Получаем состояние авторизации из стора
+    const isLoggedIn = useUIStore(state => state.isLoggedIn);
+    const token = useUIStore(state => state.token);
 
-    // ВАЖНО: Toaster должен быть частью возвращаемого JSX, но вне RouterProvider
+    useEffect(() => {
+        // Инициализация темы (темная/светлая)
+        useUIStore.getState().initializeTheme();
+
+        // Проверяем токен при загрузке приложения
+        const initAuth = async () => {
+            const currentToken = useUIStore.getState().token;
+            if (currentToken) {
+                const isValid = await useUIStore.getState().validateToken();
+                if (!isValid) {
+                    return; // Токен невалиден, выходим
+                }
+            }
+        };
+
+        initAuth();
+    }, [token]); // Зависимость от token для перепроверки при изменении
+
+    useEffect(() => {
+        // Если пользователь залогинен — начинаем грузить данные
+        if (isLoggedIn) {
+            console.log("User is logged in. Starting data polling...");
+
+            // 1. Загружаем регионы (один раз)
+            useRegionStore.getState().fetchRegions();
+
+            // 2. Запускаем опрос датчиков (каждые N секунд)
+            const stopPolling = useSensorStore.getState().startPolling();
+
+            // При размонтировании (или выходе) останавливаем опрос
+            return () => stopPolling();
+        }
+    }, [isLoggedIn]); // Перезапускаем эффект, если статус входа изменился
+
     return (
         <>
-            <Toaster /> {/* <-- Вот здесь он должен быть */}
+            <Toaster /> {/* Глобальные уведомления */}
             <RouterProvider router={router} />
         </>
     );

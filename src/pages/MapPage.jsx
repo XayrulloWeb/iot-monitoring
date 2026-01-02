@@ -8,7 +8,7 @@ import { useUIStore } from "../store/uiStore";
 import { useSensorStore } from "../store/sensorStore";
 import { Flame, AlertTriangle, WifiOff, MapPin, Activity, ArrowRight } from 'lucide-react';
 
-const MAP_API_KEY = "GWgqgaHGL6LiYlf1JeDi";
+const MAP_API_KEY = import.meta.env.VITE_MAP_API_KEY || "GWgqgaHGL6LiYlf1JeDi";
 
 // ---- HUD POPUP (Всплывающее окно) ----
 function BoilerPopup({ sensor }) {

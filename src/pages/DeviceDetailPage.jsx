@@ -1,16 +1,46 @@
 // src/pages/DeviceDetailPage.jsx
 import { useParams, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import { useSensorStore } from '../store/sensorStore';
-import { ArrowLeft, MapPin, Clock, AlertTriangle, CheckCircle, WifiOff, List, Download, Hash } from 'lucide-react';
+import { ArrowLeft, MapPin, Clock, AlertTriangle, CheckCircle, WifiOff, List, Download, Hash, RefreshCw } from 'lucide-react';
 import { BoilerSchema } from '../components/schema/BoilerSchema';
 import { format } from 'date-fns';
 import {WeatherWidget} from "../components/ui/WeatherWidget.jsx";
-import * as XLSX from 'xlsx'; // <-- Добавь это в импорты
+import * as XLSX from 'xlsx';
+
 export default function DeviceDetailPage() {
     const { id } = useParams();
     const navigate = useNavigate();
     const sensors = useSensorStore(state => state.sensors);
+    const fetchSensorLive = useSensorStore(state => state.fetchSensorLive);
+    const syncSensor = useSensorStore(state => state.syncSensor);
     const sensor = sensors.find(s => s.id === id);
+    const [isLoadingLive, setIsLoadingLive] = useState(false);
+    const [isSyncing, setIsSyncing] = useState(false);
+
+    // Загружаем live данные при монтировании и периодически
+    useEffect(() => {
+        if (!sensor) return;
+
+        // Загружаем сразу
+        const loadLiveData = async () => {
+            setIsLoadingLive(true);
+            try {
+                await fetchSensorLive(sensor.id);
+            } catch (err) {
+                console.error("Failed to load live data:", err);
+            } finally {
+                setIsLoadingLive(false);
+            }
+        };
+
+        loadLiveData();
+
+        // Обновляем каждые 10 минут (600000 мс) или можно изменить на нужный интервал
+        // Для более частого обновления используйте: 10000 (10 сек), 30000 (30 сек), 60000 (1 мин)
+        const interval = setInterval(loadLiveData, 600000); // 10 минут
+        return () => clearInterval(interval);
+    }, [sensor?.id, fetchSensorLive]);
 
     if (!sensor) {
         return (
@@ -28,9 +58,25 @@ export default function DeviceDetailPage() {
         if (t_out < 60) return { label: 'LOW TEMP', color: 'text-red-400 bg-red-500/10 border-red-500/20' };
         return { label: 'NORMAL', color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' };
     };
-// Функция экспорта в настоящий Excel (.xlsx)
+    // Обработчик синхронизации
+    const handleSync = async () => {
+        if (!sensor) return;
+        setIsSyncing(true);
+        try {
+            await syncSensor(sensor.id);
+        } catch (err) {
+            console.error("Sync failed:", err);
+        } finally {
+            setIsSyncing(false);
+        }
+    };
+
+    // Функция экспорта в настоящий Excel (.xlsx)
     const handleExport = () => {
-        if (!sensor || !sensor.history.length) return;
+        if (!sensor || !sensor.history || sensor.history.length === 0) {
+            alert('No history data available to export');
+            return;
+        }
 
         // 1. Подготовка данных
         const data = sensor.history.map(log => {
@@ -93,11 +139,21 @@ export default function DeviceDetailPage() {
                 </div>
                 <div className="flex items-center gap-3">
                     {/* Виджет погоды для ЭТОГО города */}
-                    <WeatherWidget lat={sensor.coords[0]} lng={sensor.coords[1]} cityName={sensor.cityName} />
+                    <WeatherWidget lat={sensor.coords[1]} lng={sensor.coords[0]} cityName={sensor.cityName} />
 
                     <button
-                        onClick={handleExport} // <-- ДОБАВЛЕНО
-                        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg transition-colors shadow-lg shadow-indigo-900/20"
+                        onClick={handleSync}
+                        disabled={isSyncing}
+                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg transition-colors shadow-lg shadow-blue-900/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        <RefreshCw size={14} className={isSyncing ? "animate-spin" : ""} /> 
+                        {isSyncing ? "SYNCING..." : "SYNC SENSOR"}
+                    </button>
+
+                    <button
+                        onClick={handleExport}
+                        disabled={!sensor.history || sensor.history.length === 0}
+                        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg transition-colors shadow-lg shadow-indigo-900/20 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         <Download size={14} /> EXPORT LOGS
                     </button>
@@ -131,9 +187,16 @@ export default function DeviceDetailPage() {
                             <div className="text-right">Status</div>
                         </div>
                         <div className="flex-1 overflow-y-auto custom-scrollbar">
-                            <table className="w-full">
-                                <tbody>
-                                {sensor.history.map((log, index) => {
+                            {(!sensor.history || sensor.history.length === 0) ? (
+                                <div className="h-full flex flex-col items-center justify-center text-slate-500">
+                                    <List size={48} className="mb-4 opacity-50" />
+                                    <p className="font-mono text-sm">NO HISTORY DATA</p>
+                                    <p className="text-xs mt-2">Click SYNC SENSOR to load data</p>
+                                </div>
+                            ) : (
+                                <table className="w-full">
+                                    <tbody>
+                                    {sensor.history.map((log, index) => {
                                     const status = getLogStatus(log.t_out);
                                     const delta = (log.t_out - log.t_in).toFixed(1);
                                     return (
@@ -153,8 +216,9 @@ export default function DeviceDetailPage() {
                                         </tr>
                                     );
                                 })}
-                                </tbody>
-                            </table>
+                                    </tbody>
+                                </table>
+                            )}
                         </div>
                     </div>
                 </div>
