@@ -75,7 +75,7 @@ export function BoilerSchema({ sensor }) {
                     <div className="bg-black/80 backdrop-blur border border-orange-500/50 p-2 rounded-lg shadow-[0_0_15px_rgba(245,158,11,0.2)] min-w-[100px] text-center transform transition-transform hover:scale-110">
                         <div className="text-[9px] text-orange-400 uppercase font-bold mb-1 tracking-wider">Feed Temp</div>
                         <div className="text-2xl font-mono font-bold text-white flex items-center justify-center gap-1">
-                            {sensor.telemetry.t_out}°
+                            {parseFloat(sensor.telemetry.t_out || 0).toFixed(1)}°
                             <Activity size={14} className="text-orange-500"/>
                         </div>
                     </div>
@@ -89,7 +89,7 @@ export function BoilerSchema({ sensor }) {
                     <div className="bg-black/80 backdrop-blur border border-blue-500/50 p-2 rounded-lg shadow-[0_0_15px_rgba(59,130,246,0.2)] min-w-[100px] text-center transform transition-transform hover:scale-110">
                         <div className="text-[9px] text-blue-400 uppercase font-bold mb-1 tracking-wider">Return Temp</div>
                         <div className="text-xl font-mono font-bold text-white">
-                            {sensor.telemetry.t_in}°
+                            {parseFloat(sensor.telemetry.t_in || 0).toFixed(1)}°
                         </div>
                     </div>
                     {/* Линия к трубе */}

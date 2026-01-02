@@ -10,6 +10,10 @@ import { useRegionStore } from '../store/regionStore';
 import { AddRegionModal } from '../components/ui/AddRegionModal';
 import { AddDistrictModal } from '../components/ui/AddDistrictModal';
 
+// --- НОВАЯ БИБЛИОТЕКА (Современная и без ошибок) ---
+import { Virtuoso } from 'react-virtuoso';
+
+// Компонент бейджа статуса
 const StatusBadge = ({ status }) => {
     if (status === 'danger') {
         return (
@@ -43,7 +47,7 @@ export default function DevicesPage() {
     const syncAllSensors = useSensorStore(state => state.syncAllSensors);
     const navigate = useNavigate();
 
-    // Загружаем данные при монтировании, если их еще нет
+    // Загружаем данные при монтировании
     useEffect(() => {
         if (sensors.length === 0) {
             fetchSensors();
@@ -60,7 +64,7 @@ export default function DevicesPage() {
     const [selectedCityId, setSelectedCityId] = useState('all');
     const [selectedDistrictId, setSelectedDistrictId] = useState('all');
     const [statusFilter, setStatusFilter] = useState('all');
-    const [sortConfig, setSortConfig] = useState({ key: 't_out', direction: 'desc' });
+    const [sortConfig, setSortConfig] = useState({ key: 'lastUpdate', direction: 'desc' });
     const [isSyncing, setIsSyncing] = useState(false);
     const [isAddRegionOpen, setIsAddRegionOpen] = useState(false);
     const [isAddDistrictOpen, setIsAddDistrictOpen] = useState(false);
@@ -83,38 +87,37 @@ export default function DevicesPage() {
         }));
     };
 
-    // ФИЛЬТРАЦИЯ
+    // ФИЛЬТРАЦИЯ И СОРТИРОВКА
     const processedSensors = useMemo(() => {
         if (!sensors || !Array.isArray(sensors)) return [];
         let result = sensors;
 
-        // Поиск
+        // 1. Поиск
         if (searchQuery) {
             const q = searchQuery.toLowerCase();
             result = result.filter(s =>
-                s.name.toLowerCase().includes(q) ||
-                String(s.id).toLowerCase().includes(q) ||
+                (s.name && s.name.toLowerCase().includes(q)) ||
+                (s.id && String(s.id).toLowerCase().includes(q)) ||
                 (s.serialNumber && s.serialNumber.toLowerCase().includes(q))
             );
         }
 
-        // Фильтр по Региону (City)
+        // 2. Регион
         if (selectedCityId !== 'all') {
-            // Приводим к строке для надежности, так как с бэка могут прийти числа
             result = result.filter(s => String(s.cityId) === String(selectedCityId));
         }
 
-        // Фильтр по Району (District)
+        // 3. Район
         if (selectedDistrictId !== 'all') {
             result = result.filter(s => String(s.districtId) === String(selectedDistrictId));
         }
 
-        // Фильтр по Статусу
+        // 4. Статус
         if (statusFilter !== 'all') {
             result = result.filter(s => s.status === statusFilter);
         }
 
-        // Сортировка
+        // 5. Сортировка
         result = [...result].sort((a, b) => {
             let valA, valB;
             switch (sortConfig.key) {
@@ -134,18 +137,79 @@ export default function DevicesPage() {
     // Получаем список районов для выбранного региона
     const availableDistricts = useMemo(() => {
         if (selectedCityId === 'all' || !regions || !Array.isArray(regions)) return [];
-        // Ищем регион по ID (нестрогое сравнение ==, чтобы "1" == 1 работало)
-        const region = regions.find(r => r.id == selectedCityId);
+        const region = regions.find(r => String(r.id) === String(selectedCityId));
         return region && region.districts ? region.districts : [];
     }, [selectedCityId, regions]);
 
     const handleCityChange = (e) => {
         setSelectedCityId(e.target.value);
-        setSelectedDistrictId('all'); // Сбрасываем район при смене города
+        setSelectedDistrictId('all');
+    };
+
+    // --- РЕНДЕР СТРОКИ ---
+    const RowContent = (index, sensor) => {
+        return (
+            <div
+                onClick={() => navigate(`/devices/${sensor.id}`)}
+                className="flex items-center border-b border-[var(--border-color)]/50 hover:bg-white/5 transition-colors cursor-pointer group box-border h-[72px]"
+            >
+                {/* Status */}
+                <div className="px-4 w-24 flex items-center shrink-0">
+                    <StatusBadge status={sensor.status} />
+                </div>
+
+                {/* Serial */}
+                <div className="px-4 w-32 shrink-0">
+                    <div className="text-[11px] font-mono text-indigo-300 bg-indigo-500/10 px-2 py-1 rounded border border-indigo-500/20 whitespace-nowrap w-fit flex items-center gap-1">
+                        <Hash size={10} className="opacity-50"/> {sensor.serialNumber}
+                    </div>
+                </div>
+
+                {/* Name & Location (Flex-1) */}
+                <div className="px-4 flex-1 min-w-0">
+                    <div className="font-bold text-sm text-white group-hover:text-[var(--color-cool)] transition-colors mb-0.5 truncate">
+                        {sensor.name}
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-[var(--text-muted)] font-mono truncate">
+                        <span className="bg-white/5 px-1.5 rounded shrink-0">{String(sensor.id).slice(0, 8)}...</span>
+                        <span className="text-[var(--text-muted)]/50">|</span>
+                        <MapPin size={10} className="shrink-0" />
+                        <span className="truncate">{sensor.cityName}, {sensor.districtName}</span>
+                    </div>
+                </div>
+
+                {/* Feed Temp */}
+                <div className="px-4 w-28 text-right shrink-0">
+                    <div className={`text-xl font-mono font-bold ${sensor.status === 'offline' ? 'text-[var(--text-muted)]' : 'text-[var(--color-heat)]'}`}>
+                        {sensor.status === 'offline' ? '--' : sensor.telemetry.t_out.toFixed(1)}°
+                    </div>
+                    <div className="text-[10px] text-[var(--text-muted)] uppercase">Feed</div>
+                </div>
+
+                {/* Return Temp */}
+                <div className="px-4 w-28 text-right shrink-0">
+                    <div className={`text-xl font-mono font-bold ${sensor.status === 'offline' ? 'text-[var(--text-muted)]' : 'text-[var(--color-cool)]'}`}>
+                        {sensor.status === 'offline' ? '--' : sensor.telemetry.t_in.toFixed(1)}°
+                    </div>
+                    <div className="text-[10px] text-[var(--text-muted)] uppercase">Return</div>
+                </div>
+
+                {/* Updated */}
+                <div className="px-4 w-32 text-right shrink-0">
+                    <div className="text-sm font-mono text-[var(--text-main)]">
+                        {format(new Date(sensor.lastUpdate), 'HH:mm:ss')}
+                    </div>
+                    <div className="text-[10px] text-[var(--text-muted)]">
+                        {format(new Date(sensor.lastUpdate), 'dd MMM')}
+                    </div>
+                </div>
+            </div>
+        );
     };
 
     return (
-        <div className="p-8 h-full overflow-hidden flex flex-col">
+        <div className="p-6 h-full overflow-hidden flex flex-col box-border">
+            {/* ШАПКА СТРАНИЦЫ */}
             <div className="flex flex-col md:flex-row justify-between items-end mb-6 shrink-0">
                 <div>
                     <h1 className="text-3xl font-bold font-mono text-white mb-2 flex items-center gap-3">
@@ -158,14 +222,14 @@ export default function DevicesPage() {
                     </div>
                 </div>
 
+                {/* ПАНЕЛЬ ФИЛЬТРОВ */}
                 <div className="flex flex-wrap items-center gap-3 bg-[var(--bg-panel)] p-1.5 rounded-xl border border-[var(--border-color)]">
 
-                    {/* КНОПКА СИНХРОНИЗАЦИИ ВСЕХ */}
                     <button
                         onClick={handleSyncAll}
                         disabled={isSyncing}
                         className="flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Синхронизировать все сенсоры с сервером"
+                        title="Sync All Sensors"
                     >
                         <RefreshCw size={14} className={isSyncing ? "animate-spin" : ""} />
                         {isSyncing ? "SYNCING..." : "SYNC ALL"}
@@ -173,7 +237,7 @@ export default function DevicesPage() {
 
                     <div className="w-[1px] h-6 bg-[var(--border-color)]"></div>
 
-                    {/* ПОИСК */}
+                    {/* Search */}
                     <div className="relative group">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--color-cool)]" size={16} />
                         <input
@@ -187,9 +251,9 @@ export default function DevicesPage() {
 
                     <div className="w-[1px] h-6 bg-[var(--border-color)]"></div>
 
-                    {/* РЕГИОНЫ (С БЭКА) */}
+                    {/* Region Filter */}
                     <div className="relative flex items-center gap-1">
-                        <select value={selectedCityId} onChange={handleCityChange} className="pl-3 pr-8 py-2 bg-transparent text-sm font-bold focus:outline-none appearance-none cursor-pointer text-[var(--text-main)] hover:text-white">
+                        <select value={selectedCityId} onChange={handleCityChange} className="pl-3 pr-8 py-2 bg-transparent text-sm font-bold focus:outline-none appearance-none cursor-pointer text-[var(--text-main)] hover:text-white max-w-[150px]">
                             <option value="all" className="bg-[#02040a]">ALL REGIONS</option>
                             {regions && Array.isArray(regions) && regions.map(region => (
                                 <option key={region.id} value={region.id} className="bg-[#02040a]">
@@ -201,18 +265,18 @@ export default function DevicesPage() {
                         <button
                             onClick={() => setIsAddRegionOpen(true)}
                             className="p-1.5 rounded-lg hover:bg-white/10 text-[var(--text-muted)] hover:text-emerald-400 transition-colors"
-                            title="Add new region"
+                            title="Add Region"
                         >
                             <Plus size={14} />
                         </button>
                     </div>
 
-                    {/* РАЙОНЫ (ПОДГРУЖАЮТСЯ) */}
+                    {/* District Filter */}
                     {selectedCityId !== 'all' && (
                         <>
                             <div className="w-[1px] h-6 bg-[var(--border-color)]"></div>
                             <div className="relative flex items-center gap-1 animate-fadeIn">
-                                <select value={selectedDistrictId} onChange={(e) => setSelectedDistrictId(e.target.value)} className="pl-3 pr-8 py-2 bg-transparent text-sm font-bold focus:outline-none appearance-none cursor-pointer text-[var(--text-main)] hover:text-white">
+                                <select value={selectedDistrictId} onChange={(e) => setSelectedDistrictId(e.target.value)} className="pl-3 pr-8 py-2 bg-transparent text-sm font-bold focus:outline-none appearance-none cursor-pointer text-[var(--text-main)] hover:text-white max-w-[150px]">
                                     <option value="all" className="bg-[#02040a]">ALL DISTRICTS</option>
                                     {availableDistricts && Array.isArray(availableDistricts) && availableDistricts.map(d => (
                                         <option key={d.id} value={d.id} className="bg-[#02040a]">
@@ -224,7 +288,7 @@ export default function DevicesPage() {
                                 <button
                                     onClick={() => setIsAddDistrictOpen(true)}
                                     className="p-1.5 rounded-lg hover:bg-white/10 text-[var(--text-muted)] hover:text-emerald-400 transition-colors"
-                                    title="Add new district"
+                                    title="Add District"
                                 >
                                     <Plus size={14} />
                                 </button>
@@ -234,7 +298,7 @@ export default function DevicesPage() {
 
                     <div className="w-[1px] h-6 bg-[var(--border-color)]"></div>
 
-                    {/* СТАТУС */}
+                    {/* Status Filter */}
                     <div className="relative">
                         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="pl-3 pr-8 py-2 bg-transparent text-sm font-bold focus:outline-none appearance-none cursor-pointer text-[var(--text-main)] hover:text-white">
                             <option value="all" className="bg-[#02040a]">ALL STATUS</option>
@@ -247,93 +311,49 @@ export default function DevicesPage() {
                 </div>
             </div>
 
-            {/* ТАБЛИЦА */}
-            <div className="flex-1 overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--bg-panel)] backdrop-blur-sm relative">
-                <div className="absolute top-0 left-0 right-0 h-12 bg-[#02040a]/80 border-b border-[var(--border-color)] flex items-center px-4 text-xs font-mono text-[var(--text-muted)] uppercase tracking-wider z-10">
-                    <div className="w-24">Status</div>
-                    <div className="w-32">Serial No</div>
-                    <div className="flex-1 cursor-pointer hover:text-white flex items-center gap-1" onClick={() => handleSort('name')}>
-                        Unit Info / Location <ArrowUpDown size={10} />
+            {/* КОНТЕЙНЕР ТАБЛИЦЫ */}
+            <div className="flex-1 rounded-xl border border-[var(--border-color)] bg-[var(--bg-panel)] backdrop-blur-sm relative overflow-hidden flex flex-col">
+
+                {/* ЗАГОЛОВОК ТАБЛИЦЫ */}
+                <div className="h-12 bg-[#02040a]/80 border-b border-[var(--border-color)] flex items-center text-xs font-mono text-[var(--text-muted)] uppercase tracking-wider z-10 shrink-0">
+                    <div className="px-4 w-24">Status</div>
+                    <div className="px-4 w-32">Serial No</div>
+                    <div className="px-4 flex-1 cursor-pointer hover:text-white flex items-center gap-1" onClick={() => handleSort('name')}>
+                        Unit Info <ArrowUpDown size={10} />
                     </div>
-                    <div className="w-32 text-right cursor-pointer hover:text-white flex items-center justify-end gap-1" onClick={() => handleSort('t_out')}>
-                        Feed Temp <ArrowUpDown size={10} />
+                    <div className="px-4 w-28 text-right cursor-pointer hover:text-white flex items-center justify-end gap-1" onClick={() => handleSort('t_out')}>
+                        Feed <ArrowUpDown size={10} />
                     </div>
-                    <div className="w-32 text-right cursor-pointer hover:text-white flex items-center justify-end gap-1" onClick={() => handleSort('t_in')}>
+                    <div className="px-4 w-28 text-right cursor-pointer hover:text-white flex items-center justify-end gap-1" onClick={() => handleSort('t_in')}>
                         Return <ArrowUpDown size={10} />
                     </div>
-                    <div className="w-32 text-right cursor-pointer hover:text-white flex items-center justify-end gap-1" onClick={() => handleSort('lastUpdate')}>
+                    <div className="px-4 w-32 text-right cursor-pointer hover:text-white flex items-center justify-end gap-1" onClick={() => handleSort('lastUpdate')}>
                         Updated <ArrowUpDown size={10} />
                     </div>
                 </div>
 
-                <div className="absolute top-12 left-0 right-0 bottom-0 overflow-y-auto custom-scrollbar">
+                {/* ТЕЛО ТАБЛИЦЫ (VIRTUOSO) */}
+                <div className="flex-1 bg-[#02040a]">
                     {!processedSensors || processedSensors.length === 0 ? (
                         <div className="h-full flex items-center justify-center text-[var(--text-muted)]">NO UNITS FOUND</div>
                     ) : (
-                        <table className="w-full text-left border-collapse">
-                            <tbody>
-                            {Array.isArray(processedSensors) && processedSensors.map((sensor) => (
-                                <tr key={sensor.id} onClick={() => navigate(`/devices/${sensor.id}`)} className="border-b border-[var(--border-color)]/50 hover:bg-white/5 transition-colors group cursor-pointer">
-
-                                    <td className="p-4 w-24 align-middle">
-                                        <StatusBadge status={sensor.status} />
-                                    </td>
-
-                                    <td className="p-4 w-32 align-middle">
-                                        <div className="text-[11px] font-mono text-indigo-300 bg-indigo-500/10 px-2 py-1 rounded border border-indigo-500/20 whitespace-nowrap w-fit flex items-center gap-1">
-                                            <Hash size={10} className="opacity-50"/> {sensor.serialNumber}
-                                        </div>
-                                    </td>
-
-                                    <td className="p-4 align-middle">
-                                        <div className="font-bold text-sm text-white group-hover:text-[var(--color-cool)] transition-colors mb-1">
-                                            {sensor.name}
-                                        </div>
-                                        <div className="flex items-center gap-2 text-xs text-[var(--text-muted)] font-mono">
-                                            <span className="bg-white/5 px-1.5 rounded">{sensor.id}</span>
-                                            <span className="text-[var(--text-muted)]/50">|</span>
-                                            <MapPin size={10} />
-                                            {sensor.cityName}, {sensor.districtName}
-                                        </div>
-                                    </td>
-
-                                    <td className="p-4 text-right align-middle">
-                                        <div className={`text-xl font-mono font-bold ${sensor.status === 'offline' ? 'text-[var(--text-muted)]' : 'text-[var(--color-heat)]'}`}>
-                                            {sensor.status === 'offline' ? '--' : sensor.telemetry.t_out.toFixed(1)}°
-                                        </div>
-                                        <div className="text-[10px] text-[var(--text-muted)] uppercase">Feed</div>
-                                    </td>
-
-                                    <td className="p-4 text-right align-middle">
-                                        <div className={`text-xl font-mono font-bold ${sensor.status === 'offline' ? 'text-[var(--text-muted)]' : 'text-[var(--color-cool)]'}`}>
-                                            {sensor.status === 'offline' ? '--' : sensor.telemetry.t_in.toFixed(1)}°
-                                        </div>
-                                        <div className="text-[10px] text-[var(--text-muted)] uppercase">Return</div>
-                                    </td>
-
-                                    <td className="p-4 text-right align-middle">
-                                        <div className="text-sm font-mono text-[var(--text-main)]">
-                                            {format(new Date(sensor.lastUpdate), 'HH:mm:ss')}
-                                        </div>
-                                        <div className="text-[10px] text-[var(--text-muted)]">
-                                            {format(new Date(sensor.lastUpdate), 'dd MMM')}
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))}
-                            </tbody>
-                        </table>
+                        <Virtuoso
+                            style={{ height: '100%' }}
+                            data={processedSensors}
+                            itemContent={RowContent}
+                            overscan={200} // Рендерить чуть больше вперед для плавности
+                        />
                     )}
                 </div>
             </div>
 
-            {/* Модальные окна */}
-            <AddRegionModal 
-                isOpen={isAddRegionOpen} 
-                onClose={() => setIsAddRegionOpen(false)} 
+            {/* Модалки */}
+            <AddRegionModal
+                isOpen={isAddRegionOpen}
+                onClose={() => setIsAddRegionOpen(false)}
             />
-            <AddDistrictModal 
-                isOpen={isAddDistrictOpen} 
+            <AddDistrictModal
+                isOpen={isAddDistrictOpen}
                 onClose={() => setIsAddDistrictOpen(false)}
                 preselectedRegionId={selectedCityId !== 'all' ? selectedCityId : null}
             />

@@ -46,7 +46,7 @@ function BoilerPopup({ sensor }) {
                     <div className="text-center flex-1 p-2 rounded-xl bg-white/5 border border-white/5">
                         <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Feed (Out)</div>
                         <div className={`text-2xl font-bold font-mono ${tempOutGradient}`}>
-                            {isOffline ? '--' : sensor.telemetry.t_out}°
+                            {isOffline ? '--' : parseFloat(sensor.telemetry.t_out || 0).toFixed(1)}°
                         </div>
                     </div>
 
@@ -57,7 +57,7 @@ function BoilerPopup({ sensor }) {
                     <div className="text-center flex-1 p-2 rounded-xl bg-white/5 border border-white/5">
                         <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Return (In)</div>
                         <div className={`text-2xl font-bold font-mono ${tempInGradient}`}>
-                            {isOffline ? '--' : sensor.telemetry.t_in}°
+                            {isOffline ? '--' : parseFloat(sensor.telemetry.t_in || 0).toFixed(1)}°
                         </div>
                     </div>
                 </div>
@@ -134,8 +134,16 @@ export default function MapPage() {
     const [isMapLoaded, setIsMapLoaded] = useState(false);
 
     const sensors = useSensorStore((s) => s.sensors);
-    const selectedCity = useSensorStore((s) => s.selectedCity);
-    const selectedDistrict = useSensorStore((s) => s.selectedDistrict);
+    const fetchSensors = useSensorStore((s) => s.fetchSensors);
+    const selectedCity = useSensorStore((s) => s.selectedCity || 'all');
+    const selectedDistrict = useSensorStore((s) => s.selectedDistrict || 'all');
+
+    // Загружаем данные при монтировании, если их еще нет
+    useEffect(() => {
+        if (sensors.length === 0) {
+            fetchSensors();
+        }
+    }, [sensors.length, fetchSensors]);
 
     useEffect(() => {
         if (map.current || !mapContainer.current) return;
@@ -185,8 +193,28 @@ export default function MapPage() {
         });
 
         return () => {
+            // Очищаем все маркеры перед удалением карты
+            boilerMarkers.current.forEach(({ marker, root }) => {
+                try {
+                    if (marker._popup) {
+                        marker._popup.remove();
+                        if (marker._popupRoot) {
+                            marker._popupRoot.unmount();
+                        }
+                    }
+                    marker.remove();
+                    if (root) {
+                        root.unmount();
+                    }
+                } catch (err) {
+                    // Игнорируем ошибки при очистке
+                }
+            });
+            boilerMarkers.current = [];
+            
             map.current?.remove();
             map.current = null;
+            setIsMapLoaded(false);
         };
     }, []);
 
@@ -194,66 +222,119 @@ export default function MapPage() {
     useEffect(() => {
         if (!isMapLoaded || !map.current) return;
 
-        // Удаляем старые
-        boilerMarkers.current.forEach((m) => m.remove());
+        // Удаляем старые маркеры и их React roots
+        boilerMarkers.current.forEach(({ marker, root }) => {
+            try {
+                // Закрываем попап если есть и очищаем его React root
+                if (marker._popup) {
+                    marker._popup.remove();
+                    if (marker._popupRoot) {
+                        marker._popupRoot.unmount();
+                    }
+                    marker._popup = null;
+                    marker._popupRoot = null;
+                }
+                // Удаляем маркер
+                marker.remove();
+                // Очищаем React root маркера
+                if (root) {
+                    root.unmount();
+                }
+            } catch (err) {
+                console.warn("Error removing marker:", err);
+            }
+        });
         boilerMarkers.current = [];
 
-        // Фильтруем
-        const filteredSensors = sensors.filter(s =>
-            (selectedCity === 'all' || s.cityId === selectedCity) &&
-            (selectedDistrict === 'all' || s.districtId === selectedDistrict)
-        );
-
-        // Создаем новые
-        filteredSensors.forEach((sensor) => {
-            const el = document.createElement("div");
-            el.style.cursor = "pointer"; // Принудительный курсор
-
-            // Рендерим React-компонент в DOM-элемент
-            createRoot(el).render(<BoilerMarker sensor={sensor} />);
-
-            const marker = new Marker({ element: el })
-                .setLngLat(sensor.coords)
-                .addTo(map.current);
-
-            // ОБРАБОТЧИК КЛИКА (Native DOM listener)
-            el.addEventListener('click', (e) => {
-                e.stopPropagation(); // Останавливаем всплытие, чтобы карта не перехватила клик
-
-                // Создаем контейнер для попапа
-                const popupNode = document.createElement("div");
-                const root = createRoot(popupNode);
-                root.render(<BoilerPopup sensor={sensor} />);
-
-                new Popup({
-                    className: "custom-popup",
-                    closeButton: false,
-                    maxWidth: 'none',
-                    offset: 35, // Чуть выше маркера
-                    closeOnClick: true
-                })
-                    .setLngLat(sensor.coords)
-                    .setDOMContent(popupNode)
-                    .addTo(map.current);
-
-                // Центрируем карту на маркере при клике (плавно)
-                map.current.easeTo({
-                    center: sensor.coords,
-                    pitch: 60,
-                    zoom: 14,
-                    duration: 1000
-                });
-            });
-
-            boilerMarkers.current.push(marker);
+        // Фильтруем и проверяем координаты
+        const filteredSensors = sensors.filter(s => {
+            // Проверяем координаты - они должны быть валидными
+            if (!s.coords || !Array.isArray(s.coords) || s.coords.length !== 2) {
+                console.warn(`Sensor ${s.id} has invalid coordinates:`, s.coords);
+                return false;
+            }
+            const [lng, lat] = s.coords;
+            if (isNaN(lng) || isNaN(lat) || lng === 0 || lat === 0) {
+                console.warn(`Sensor ${s.id} has invalid coordinates:`, s.coords);
+                return false;
+            }
+            
+            // Фильтруем по региону и району
+            return (
+                (selectedCity === 'all' || String(s.cityId) === String(selectedCity)) &&
+                (selectedDistrict === 'all' || String(s.districtId) === String(selectedDistrict))
+            );
         });
 
-        // Автозум к фильтрованным маркерам
-        if (filteredSensors.length > 0 && (selectedCity !== 'all' || selectedDistrict !== 'all')) {
-            const bounds = new maplibre.LngLatBounds();
-            filteredSensors.forEach(sensor => bounds.extend(sensor.coords));
-            map.current.fitBounds(bounds, { padding: 100, pitch: 60, duration: 1000 });
+        // Логируем только для отладки (можно убрать в продакшене)
+        if (filteredSensors.length === 0 && sensors.length > 0) {
+            console.warn(`MapPage: No sensors to display. Filters: city=${selectedCity}, district=${selectedDistrict}`);
         }
+
+        // Создаем новые маркеры
+        filteredSensors.forEach((sensor) => {
+            try {
+                const el = document.createElement("div");
+                el.style.cursor = "pointer";
+                el.style.width = "40px";
+                el.style.height = "40px";
+
+                // Рендерим React-компонент в DOM-элемент
+                const root = createRoot(el);
+                root.render(<BoilerMarker sensor={sensor} />);
+
+                const marker = new Marker({ 
+                    element: el,
+                    anchor: 'bottom'
+                })
+                    .setLngLat(sensor.coords)
+                    .addTo(map.current);
+
+                // ОБРАБОТЧИК КЛИКА
+                el.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+
+                    // Закрываем все существующие попапы и очищаем их React roots
+                    boilerMarkers.current.forEach(({ marker: m }) => {
+                        if (m._popup) {
+                            m._popup.remove();
+                            if (m._popupRoot) {
+                                m._popupRoot.unmount();
+                            }
+                            m._popup = null;
+                            m._popupRoot = null;
+                        }
+                    });
+
+                    // Создаем контейнер для попапа
+                    const popupNode = document.createElement("div");
+                    const popupRoot = createRoot(popupNode);
+                    popupRoot.render(<BoilerPopup sensor={sensor} />);
+
+                    const popup = new Popup({
+                        className: "custom-popup",
+                        closeButton: false,
+                        maxWidth: 'none',
+                        offset: 35,
+                        closeOnClick: true
+                    })
+                        .setLngLat(sensor.coords)
+                        .setDOMContent(popupNode)
+                        .addTo(map.current);
+
+                    // Сохраняем ссылку на попап для очистки
+                    marker._popup = popup;
+                    marker._popupRoot = popupRoot;
+                });
+
+                boilerMarkers.current.push({ marker, root });
+            } catch (err) {
+                console.error(`Failed to create marker for sensor ${sensor.id}:`, err);
+            }
+        });
+
+        // Автозум убран - пользователь сам управляет картой
 
     }, [isMapLoaded, sensors, selectedCity, selectedDistrict]);
 

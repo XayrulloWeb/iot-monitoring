@@ -1,6 +1,7 @@
 // src/store/regionStore.js
 import { create } from 'zustand';
 import api from '../api';
+import { getUserFriendlyErrorMessage } from '../utils/errorMessages';
 
 export const useRegionStore = create((set, get) => ({
     regions: [],
@@ -14,27 +15,21 @@ export const useRegionStore = create((set, get) => ({
             // GET /regions возвращает массив вилоятов
             const response = await api.get('/regions');
             let regions = response.data.data || response.data || [];
-            
+
             // Загружаем дистрикты отдельно и группируем их по регионам
             try {
                 const districtsResponse = await api.get('/districts');
                 const allDistricts = districtsResponse.data.data || districtsResponse.data || [];
-                
-                console.log("Loaded districts:", allDistricts);
-                console.log("Regions before grouping:", regions);
-                
+
                 // Группируем дистрикты по region_id (приводим к числу для надежности)
                 regions = regions.map(region => {
                     const regionDistricts = allDistricts.filter(d => Number(d.region_id) === Number(region.id));
-                    console.log(`Region ${region.id} (${region.name}) has ${regionDistricts.length} districts:`, regionDistricts);
                     return {
                         ...region,
                         districts: regionDistricts
                     };
                 });
-                
-                console.log("Regions after grouping:", regions);
-                
+
                 set({ districts: allDistricts });
             } catch (districtsErr) {
                 console.warn("Failed to fetch districts, using regions with nested districts:", districtsErr);
@@ -45,13 +40,13 @@ export const useRegionStore = create((set, get) => ({
                     districts: region.districts || []
                 }));
             }
-            
+
             set({ regions, isLoading: false, error: null });
         } catch (err) {
             console.error("Failed to fetch regions:", err);
-            const errorMessage = err.response?.data?.message || 'Failed to load regions';
+            const errorMessage = getUserFriendlyErrorMessage(err);
             set({ isLoading: false, error: errorMessage });
-            
+
             // Динамический импорт для избежания циклических зависимостей
             import('./notificationStore').then(({ useNotificationStore }) => {
                 useNotificationStore.getState().addNotification(
@@ -68,10 +63,10 @@ export const useRegionStore = create((set, get) => ({
         try {
             const response = await api.post('/regions', { name });
             const newRegion = response.data.data || response.data;
-            
+
             // Обновляем список регионов
             await get().fetchRegions();
-            
+
             // Уведомление об успехе
             const { useNotificationStore } = await import('./notificationStore');
             useNotificationStore.getState().addNotification(
@@ -79,12 +74,12 @@ export const useRegionStore = create((set, get) => ({
                 response.data.message || 'Region created successfully',
                 'Success'
             );
-            
+
             return newRegion;
         } catch (err) {
             console.error("Failed to create region:", err);
-            const errorMessage = err.response?.data?.message || 'Failed to create region';
-            
+            const errorMessage = getUserFriendlyErrorMessage(err);
+
             // Уведомление об ошибке
             const { useNotificationStore } = await import('./notificationStore');
             useNotificationStore.getState().addNotification(
@@ -92,7 +87,7 @@ export const useRegionStore = create((set, get) => ({
                 errorMessage,
                 'Error'
             );
-            
+
             throw err;
         }
     },
@@ -100,15 +95,15 @@ export const useRegionStore = create((set, get) => ({
     // Создание нового дистрикта
     createDistrict: async (name, regionId) => {
         try {
-            const response = await api.post('/districts', { 
-                name, 
-                region_id: parseInt(regionId) 
+            const response = await api.post('/districts', {
+                name,
+                region_id: parseInt(regionId)
             });
             const newDistrict = response.data.data || response.data;
-            
+
             // Обновляем список регионов (чтобы получить обновленные дистрикты)
             await get().fetchRegions();
-            
+
             // Уведомление об успехе
             const { useNotificationStore } = await import('./notificationStore');
             useNotificationStore.getState().addNotification(
@@ -116,12 +111,12 @@ export const useRegionStore = create((set, get) => ({
                 response.data.message || 'District created successfully',
                 'Success'
             );
-            
+
             return newDistrict;
         } catch (err) {
             console.error("Failed to create district:", err);
-            const errorMessage = err.response?.data?.message || 'Failed to create district';
-            
+            const errorMessage = getUserFriendlyErrorMessage(err);
+
             // Уведомление об ошибке
             const { useNotificationStore } = await import('./notificationStore');
             useNotificationStore.getState().addNotification(
@@ -129,7 +124,7 @@ export const useRegionStore = create((set, get) => ({
                 errorMessage,
                 'Error'
             );
-            
+
             throw err;
         }
     }

@@ -1,60 +1,71 @@
 // src/pages/LoginPage.jsx
-import { useState, useEffect } from 'react'; // Добавили useEffect
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Lock, User, ArrowRight, Flame, ShieldCheck } from 'lucide-react';
 import { useUIStore } from '../store/uiStore';
 import api from '../api';
+import { getUserFriendlyErrorMessage } from '../utils/errorMessages';
 
 export default function LoginPage() {
-    const [username, setUsername] = useState('admin');
-    const [password, setPassword] = useState('password');
+    const [username, setUsername] = useState('');
+    const [password, setPassword] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
 
-    // Берем статус входа из стора
     const isLoggedIn = useUIStore(state => state.isLoggedIn);
     const login = useUIStore(state => state.login);
     const navigate = useNavigate();
 
-    // !!! ВАЖНОЕ ИЗМЕНЕНИЕ !!!
-    // Если мы залогинились (токен сохранился) — переходим на главную
+    // Перенаправляем, если уже вошел
     useEffect(() => {
         if (isLoggedIn) {
             navigate('/', { replace: true });
         }
     }, [isLoggedIn, navigate]);
 
-    const handleLogin = async (e) => {
-        if(e) e.preventDefault();
+    // Автозаполнение для разработки из переменных окружения
+    useEffect(() => {
+        if (import.meta.env.DEV) {
+            // Используем переменные окружения вместо хардкода
+            const devUsername = import.meta.env.VITE_DEV_USERNAME || '';
+            const devPassword = import.meta.env.VITE_DEV_PASSWORD || '';
 
-        console.log("handleLogin called with:", { username, password: '***' });
+            if (devUsername) setUsername(devUsername);
+            if (devPassword) setPassword(devPassword);
+        }
+    }, []);
+
+    const handleLogin = async (e) => {
+        if (e) e.preventDefault();
+
         setIsLoading(true);
         setError('');
 
         try {
-            // 1. Запрос
-            console.log("Sending login request to /auth/login");
+            console.log("Logging in...");
             const response = await api.post('/auth/login', { username, password });
 
-            // 2. Сохраняем в стор
-            console.log("Saving login data...", JSON.stringify(response.data, null, 2));
-            // API возвращает { success, message, data: { user, token } }
+            // API: { success: true, data: { user: {...}, token: "..." } }
             const loginData = response.data.data || response.data;
-            login(loginData);
 
-            // 3. НЕ ДЕЛАЕМ navigate ЗДЕСЬ!
-            // useEffect выше сам перекинет нас, когда стор обновится.
-            setIsLoading(false); // Сбрасываем загрузку после успешного логина
+            if (loginData.token) {
+                login(loginData);
+                // Навигация сработает через useEffect выше
+            } else {
+                throw new Error("No token received");
+            }
 
         } catch (err) {
             console.error("Login Error:", err);
-            const message = err.response?.data?.message || 'Connection Error';
+
+            // Используем user-friendly сообщение
+            const message = getUserFriendlyErrorMessage(err);
             setError(message);
-            setIsLoading(false); // Снимаем загрузку только при ошибке
+        } finally {
+            setIsLoading(false);
         }
     };
 
-    // Обработчик Enter
     const handleKeyDown = (e) => {
         if (e.key === 'Enter') {
             handleLogin(e);
@@ -74,7 +85,7 @@ export default function LoginPage() {
                     <h1 className="text-3xl font-bold text-white tracking-widest font-mono">HEAT<span className="text-orange-500">OS</span></h1>
                 </div>
 
-                <form 
+                <form
                     onSubmit={handleLogin}
                     className="glass-panel p-8 rounded-2xl border border-white/10 shadow-2xl space-y-6 backdrop-blur-xl bg-black/40"
                 >
@@ -125,7 +136,7 @@ export default function LoginPage() {
                             <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
                         ) : (
                             <>
-                                AUTHENTICATE <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform"/>
+                                AUTHENTICATE <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
                             </>
                         )}
                     </button>

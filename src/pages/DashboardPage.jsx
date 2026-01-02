@@ -216,11 +216,11 @@ export default function DashboardPage() {
                 />
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[500px]">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6" style={{ minHeight: '500px' }}>
 
                 {/* ГРАФИК */}
                 <div className="lg:col-span-2 glass-panel p-6 rounded-xl flex flex-col relative overflow-hidden">
-                    <div className="flex justify-between items-center mb-6 z-10">
+                    <div className="flex justify-between items-center mb-6 z-10 shrink-0">
                         <div className="flex items-center gap-3">
                             <Activity className="text-indigo-400" size={20}/>
                             <h3 className="font-mono font-bold text-lg tracking-wide text-white">HEAT EXCHANGE EFFICIENCY</h3>
@@ -235,8 +235,8 @@ export default function DashboardPage() {
                         </div>
                     </div>
 
-                    <div className="flex-1 w-full min-h-[300px] z-10">
-                        <ResponsiveContainer width="100%" height="100%" minHeight={300}>
+                    <div className="flex-1 w-full z-10" style={{ minHeight: '300px', aspectRatio: '16/9' }}>
+                        <ResponsiveContainer width="100%" height="100%">
                             <AreaChart data={chartData}>
                                 <defs>
                                     <linearGradient id="gradOut" x1="0" y1="0" x2="0" y2="1">
