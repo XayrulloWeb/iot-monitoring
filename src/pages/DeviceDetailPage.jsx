@@ -32,7 +32,7 @@ export default function DeviceDetailPage() {
         fetchSensorLive(id).catch(() => {}); // Первый запрос сразу
         const interval = setInterval(() => {
             fetchSensorLive(id).catch(() => {}); // Затем каждые 30 секунд
-        }, 30000);
+        }, 60000);
         return () => clearInterval(interval);
     }, [id, fetchSensorLive]);
 

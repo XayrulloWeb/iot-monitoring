@@ -72,10 +72,59 @@ export const useSensorStore = create((set, get) => ({
 
             // Подписываемся на обновления для всех полученных сенсоров
             get().subscribeToAllSensors();
+            get().hydrateFromHistory();
         } catch (err) {
             console.error("Fetch sensors failed:", err);
             set({ isLoading: false, error: getUserFriendlyErrorMessage(err) });
         }
+    },
+
+    hydrateFromHistory: async () => {
+        const { sensors } = get();
+
+        // Берем только те, у кого "нули"
+        const emptySensors = sensors.filter(s => s.telemetry.t_out === 0);
+
+        if (emptySensors.length === 0) return;
+
+        console.log(`📜 Loading history for ${emptySensors.length} sensors...`);
+
+        // Проходим по каждому "пустому" датчику
+        emptySensors.forEach(async (sensor) => {
+            try {
+                // Запрашиваем ТОЛЬКО 1 последнюю запись (limit=1) — это очень быстро
+                const res = await api.get(`/sensors/${sensor.id}/history`, {
+                    params: { page: 1, limit: 1 }
+                });
+
+                const historyData = res.data.data; // массив истории
+
+                if (historyData && historyData.length > 0) {
+                    const lastRecord = historyData[0]; // Самая свежая запись
+
+                    // Обновляем стор конкретного сенсора
+                    set(state => ({
+                        sensors: state.sensors.map(s => {
+                            if (s.id === sensor.id) {
+                                return {
+                                    ...s,
+                                    // Заполняем телеметрию данными из истории
+                                    telemetry: {
+                                        t_out: parseFloat(lastRecord.out_temp || lastRecord.temperature_out || s.telemetry.t_out),
+                                        t_in: parseFloat(lastRecord.in_temp || lastRecord.temperature_in || s.telemetry.t_in),
+                                        pressure: parseFloat(lastRecord.pressure || s.telemetry.pressure),
+                                        flow: s.telemetry.flow // flow в истории может не быть, оставляем как есть
+                                    }
+                                };
+                            }
+                            return s;
+                        })
+                    }));
+                }
+            } catch (err) {
+                console.warn(`No history for ${sensor.id}`);
+            }
+        });
     },
 
     // --- 2. ИСТОРИЯ (С ОБНОВЛЕНИЕМ ТЕЛЕМЕТРИИ) ---

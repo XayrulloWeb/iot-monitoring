@@ -235,7 +235,7 @@ export default function DashboardPage() {
                         </div>
                     </div>
 
-                    <div className="flex-1 w-full z-10" style={{ minHeight: '300px', aspectRatio: '16/9' }}>
+                    <div className="w-full h-80 z-10" style={{ minHeight: '300px', aspectRatio: '16/9' }}>
                         <ResponsiveContainer width="100%" height="100%">
                             <AreaChart data={chartData}>
                                 <defs>
