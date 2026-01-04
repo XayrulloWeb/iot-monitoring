@@ -1,3 +1,4 @@
+// src/store/sensorStore.js
 import { create } from 'zustand';
 import api from '../api';
 import { io } from 'socket.io-client';
@@ -26,38 +27,48 @@ export const useSensorStore = create((set, get) => ({
         per_page: 50
     },
 
-    // --- 1. СПИСОК СЕНСОРОВ ---
+    // --- 1. СПИСОК СЕНСОРОВ (LOAD ALL) ---
     fetchSensors: async () => {
         if (get().sensors.length === 0) set({ isLoading: true, error: null });
 
         try {
-            const response = await api.get('/sensors');
+            // ВАЖНО: limit=1000, чтобы получить ВСЕ сенсоры одной пачкой
+            const response = await api.get('/sensors', {
+                params: { page: 1, limit: 1000 }
+            });
+
             const rawData = response.data.data || [];
 
             const adaptedSensors = rawData.map(s => {
+                // Безопасное чтение вложенных объектов
+                const district = s.district || {};
+                const region = district.region || {};
                 const loc = s.location || {};
-                let longitude = 69.2401;
-                let latitude = 41.2995;
-                if (Array.isArray(loc.coordinates) && loc.coordinates.length === 2) {
-                    longitude = parseFloat(loc.coordinates[0]);
-                    latitude = parseFloat(loc.coordinates[1]);
-                } else if (loc.longitude && loc.latitude) {
-                    longitude = parseFloat(loc.longitude);
-                    latitude = parseFloat(loc.latitude);
-                }
 
                 return {
-                    id: s.uuid || s.id,
+                    id: s.uuid, // UUID - главный ключ
+                    dbId: s.id, // Числовой ID про запас
                     name: s.name || 'Unnamed Unit',
-                    serialNumber: s.serial_number || s.serialNumber || 'N/A',
-                    cityId: s.district?.region_id ? String(s.district.region_id) : 'unknown',
-                    cityName: s.district?.region?.name || 'Unknown Region',
-                    districtId: s.district?.id ? String(s.district.id) : 'unknown',
-                    districtName: s.district?.name || 'Unknown District',
-                    address: loc.address || s.address || 'No address',
-                    coords: [longitude, latitude],
+                    serialNumber: s.serial_number || 'N/A',
+
+                    // --- МАППИНГ РЕГИОНОВ ---
+                    cityId: region.id ? String(region.id) : 'unknown',
+                    cityName: region.name || 'Unknown Region',
+
+                    districtId: district.id ? String(district.id) : 'unknown',
+                    districtName: district.name || 'Unknown District',
+                    // ------------------------
+
+                    address: s.description || 'No description',
+
+                    coords: [
+                        parseFloat(loc.long || loc.longitude || 69.2401),
+                        parseFloat(loc.lat || loc.latitude || 41.2995)
+                    ],
+
                     status: mapApiStatusToUi(s.status),
                     lastUpdate: s.last_seen_at ? new Date(s.last_seen_at).getTime() : Date.now(),
+
                     telemetry: {
                         t_out: parseFloat(s.out_temp || s.temperature_out || 0),
                         t_in: parseFloat(s.in_temp || s.temperature_in || 0),
@@ -70,50 +81,51 @@ export const useSensorStore = create((set, get) => ({
 
             set({ sensors: adaptedSensors, isLoading: false, error: null });
 
-            // Подписываемся на обновления для всех полученных сенсоров
+            // Подписываемся на обновления
             get().subscribeToAllSensors();
+
+            // Запускаем подтягивание последних данных, если в списке пришли нули
             get().hydrateFromHistory();
+
         } catch (err) {
             console.error("Fetch sensors failed:", err);
             set({ isLoading: false, error: getUserFriendlyErrorMessage(err) });
         }
     },
 
+    // Эта функция ищет сенсоры с "нулевой" температурой и делает запрос к истории,
+    // чтобы показать хоть какие-то последние данные вместо 0.0
     hydrateFromHistory: async () => {
         const { sensors } = get();
-
-        // Берем только те, у кого "нули"
+        // Ищем сенсоры, у которых t_out == 0 (значит API списка не вернуло телеметрию)
         const emptySensors = sensors.filter(s => s.telemetry.t_out === 0);
 
         if (emptySensors.length === 0) return;
 
-        console.log(`📜 Loading history for ${emptySensors.length} sensors...`);
+        // Чтобы не спамить, берем только первые 10 (или можно убрать slice, если нужно для всех)
+        const sensorsToUpdate = emptySensors.slice(0, 10);
 
-        // Проходим по каждому "пустому" датчику
-        emptySensors.forEach(async (sensor) => {
+        sensorsToUpdate.forEach(async (sensor) => {
             try {
-                // Запрашиваем ТОЛЬКО 1 последнюю запись (limit=1) — это очень быстро
+                // Берем только 1 последнюю запись
                 const res = await api.get(`/sensors/${sensor.id}/history`, {
                     params: { page: 1, limit: 1 }
                 });
 
-                const historyData = res.data.data; // массив истории
-
+                const historyData = res.data.data;
                 if (historyData && historyData.length > 0) {
-                    const lastRecord = historyData[0]; // Самая свежая запись
+                    const lastRecord = historyData[0];
 
-                    // Обновляем стор конкретного сенсора
                     set(state => ({
                         sensors: state.sensors.map(s => {
                             if (s.id === sensor.id) {
                                 return {
                                     ...s,
-                                    // Заполняем телеметрию данными из истории
                                     telemetry: {
+                                        ...s.telemetry,
                                         t_out: parseFloat(lastRecord.out_temp || lastRecord.temperature_out || s.telemetry.t_out),
                                         t_in: parseFloat(lastRecord.in_temp || lastRecord.temperature_in || s.telemetry.t_in),
-                                        pressure: parseFloat(lastRecord.pressure || s.telemetry.pressure),
-                                        flow: s.telemetry.flow // flow в истории может не быть, оставляем как есть
+                                        pressure: parseFloat(lastRecord.pressure || s.telemetry.pressure)
                                     }
                                 };
                             }
@@ -122,12 +134,12 @@ export const useSensorStore = create((set, get) => ({
                     }));
                 }
             } catch (err) {
-                console.warn(`No history for ${sensor.id}`);
+                // Тихо игнорируем, если истории нет
             }
         });
     },
 
-    // --- 2. ИСТОРИЯ (С ОБНОВЛЕНИЕМ ТЕЛЕМЕТРИИ) ---
+    // --- 2. ИСТОРИЯ ---
     fetchSensorHistory: async (uuid, page = 1, limit = 50) => {
         set({ isHistoryLoading: true });
         try {
@@ -139,14 +151,8 @@ export const useSensorStore = create((set, get) => ({
             const historyList = responseData.data || [];
             const meta = responseData.meta || {};
 
-            // API возвращает данные в формате: { in_temp: "23.80", out_temp: "21.30", pressure: "759.20" }
-            // Температуры и давление приходят как строки, нужно парсить
-            // Timestamp не приходит, генерируем на основе индекса (самые свежие первыми)
             const formattedHistory = historyList.map((item, index) => {
-                // Пытаемся найти реальный timestamp в данных
                 let itemTime = item.created_at || item.timestamp || item.date || item.time;
-
-                // Если времени нет, генерируем fallback на основе индекса
                 if (!itemTime) {
                     const timeOffset = index * 5 * 60 * 1000;
                     itemTime = new Date(Date.now() - timeOffset).toISOString();
@@ -160,10 +166,7 @@ export const useSensorStore = create((set, get) => ({
                 };
             });
 
-            // !!! ВАЖНОЕ ИЗМЕНЕНИЕ !!!
-            // Если мы на первой странице, берем самую свежую запись из истории
-            // и обновляем ею текущие показатели (telemetry).
-            // Это спасет ситуацию, если Live (504) не работает.
+            // Если открыли первую страницу истории, обновляем текущий статус сенсора
             let latestTelemetry = null;
             if (page === 1 && formattedHistory.length > 0) {
                 latestTelemetry = formattedHistory[0];
@@ -172,7 +175,6 @@ export const useSensorStore = create((set, get) => ({
             set(state => ({
                 sensors: state.sensors.map(s => {
                     if (s.id === uuid) {
-                        // Если есть свежие данные из истории, обновляем telemetry
                         const updatedTelemetry = latestTelemetry ? {
                             ...s.telemetry,
                             t_out: latestTelemetry.t_out,
@@ -183,7 +185,7 @@ export const useSensorStore = create((set, get) => ({
                         return {
                             ...s,
                             history: formattedHistory,
-                            telemetry: updatedTelemetry // <-- Обновляем показатели
+                            telemetry: updatedTelemetry
                         };
                     }
                     return s;
@@ -207,7 +209,7 @@ export const useSensorStore = create((set, get) => ({
     fetchSensorLive: async (uuid) => {
         try {
             const response = await api.get(`/sensors/${uuid}/live`);
-            const data = response.data.data;
+            const data = response.data.data; // Объект данных
 
             set((state) => ({
                 sensors: state.sensors.map(s => {
@@ -218,9 +220,9 @@ export const useSensorStore = create((set, get) => ({
                             lastUpdate: Date.now(),
                             telemetry: {
                                 ...s.telemetry,
-                                t_out: parseFloat(data.out_temp || s.telemetry.t_out),
-                                t_in: parseFloat(data.in_temp || s.telemetry.t_in),
-                                pressure: parseFloat(data.pressure || s.telemetry.pressure),
+                                t_out: data.out_temp !== undefined ? parseFloat(data.out_temp) : s.telemetry.t_out,
+                                t_in: data.in_temp !== undefined ? parseFloat(data.in_temp) : s.telemetry.t_in,
+                                pressure: data.pressure !== undefined ? parseFloat(data.pressure) : s.telemetry.pressure,
                             }
                         };
                     }
@@ -229,17 +231,13 @@ export const useSensorStore = create((set, get) => ({
             }));
             return data;
         } catch (err) {
-            // 504 Gateway Timeout - это нормально, сенсор может не отвечать в течение 5 секунд
-            // Не логируем в консоль, чтобы не засорять её
             if (err.response?.status !== 504) {
-                // Логируем только другие ошибки
                 console.warn(`Live data fetch failed for ${uuid}:`, err.response?.status || err.message);
             }
             return null;
         }
     },
 
-    // --- 4. СИНХРОНИЗАЦИЯ ---
     syncAllSensors: async () => {
         try {
             await api.post('/sensors/sync');
@@ -260,35 +258,14 @@ export const useSensorStore = create((set, get) => ({
     startPolling: (intervalMs = 60000) => {
         let isPolling = false;
         const { fetchSensors } = get();
-
         const poll = async () => {
-            // Если предыдущий запрос еще не завершен, пропускаем
-            if (isPolling) {
-                console.warn('Previous poll is still running, skipping...');
-                return;
-            }
-
+            if (isPolling) return;
             isPolling = true;
-            try {
-                await fetchSensors();
-            } catch (err) {
-                console.error('Polling error:', err);
-            } finally {
-                isPolling = false;
-            }
+            try { await fetchSensors(); } catch (err) { console.error(err); } finally { isPolling = false; }
         };
-
-        // Первый запрос сразу
         poll();
-
-        // Повторяющиеся запросы каждые intervalMs
         const interval = setInterval(poll, intervalMs);
-
-        // Возвращаем функцию очистки
-        return () => {
-            clearInterval(interval);
-            isPolling = false;
-        };
+        return () => { clearInterval(interval); isPolling = false; };
     },
 
     disconnectSocket: () => {
@@ -299,29 +276,17 @@ export const useSensorStore = create((set, get) => ({
         }
     },
 
-    // --- 5. Websocket Logic ---
     subscribeToAllSensors: () => {
         const { socket, isSocketConnected, sensors } = get();
         if (!socket || !isSocketConnected) return;
-
-        console.log(`📡 Subscribing to ${sensors.length} sensors...`);
         sensors.forEach(sensor => {
-            // Подписываемся на обновления конкретного сенсора
             socket.emit('join_sensor', sensor.id);
         });
     },
 
     handleSensorUpdate: (data) => {
-        // data пример: { in_temp: 22, out_temp: 15, pressure: 760 }
-        // Проблема: в примере пользователя в data нет ID сенсора. 
-        // Если сервер не присылает ID, мы не знаем кого обновлять.
-        // Пытаемся найти ID в data (uuid, id, sensor_id)
         const sensorId = data.uuid || data.id || data.sensor_id;
-
-        if (!sensorId) {
-            console.warn('Received sensor_update without ID:', data);
-            return;
-        }
+        if (!sensorId) return;
 
         set(state => ({
             sensors: state.sensors.map(s => {
@@ -349,22 +314,11 @@ export const useSensorStore = create((set, get) => ({
         let socketUrl = import.meta.env.VITE_SOCKET_URL;
         if (!socketUrl) {
             const apiUrl = import.meta.env.VITE_API_URL || window.location.origin;
-            try {
-                const url = new URL(apiUrl);
-                socketUrl = url.origin;
-            } catch (e) {
-                socketUrl = apiUrl;
-            }
+            try { socketUrl = new URL(apiUrl).origin; } catch (e) { socketUrl = apiUrl; }
         }
 
-        console.log('Connecting to Socket.IO at:', socketUrl);
-
-        // Используем токен из uiStore, так как он там актуален и в localStorage может лежать в JSON
         const token = useUIStore.getState().token;
-        if (!token) {
-            console.warn('Socket connection skipped: no token');
-            return;
-        }
+        if (!token) return;
 
         const newSocket = io(socketUrl, {
             auth: { token },
@@ -374,31 +328,15 @@ export const useSensorStore = create((set, get) => ({
         });
 
         newSocket.on('connect', () => {
-            console.log('✅ Socket connected:', newSocket.id);
             set({ isSocketConnected: true });
-            get().fetchSensors(); // Это запустит fetch, который запустит subscribeToAllSensors
+            get().fetchSensors();
         });
 
-        newSocket.on('disconnect', (reason) => {
-            console.log('❌ Socket disconnected:', reason);
-            set({ isSocketConnected: false });
-        });
+        newSocket.on('disconnect', () => set({ isSocketConnected: false }));
+        newSocket.on('connect_error', () => set({ isSocketConnected: false }));
 
-        newSocket.on('connect_error', (err) => {
-            set({ isSocketConnected: false });
-        });
-
-        // Слушаем событие обновления (как в примере пользователя)
         newSocket.on('sensor_update', (data) => {
-            // console.log('📩 Real-time update:', data);
             get().handleSensorUpdate(data);
-        });
-
-        // Debug
-        newSocket.onAny((eventName, ...args) => {
-            if (import.meta.env.DEV && eventName !== 'sensor_update') {
-                console.log(`📩 Socket Event [${eventName}]:`, args);
-            }
         });
 
         set({ socket: newSocket });

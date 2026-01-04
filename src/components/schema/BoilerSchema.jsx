@@ -8,6 +8,11 @@ export function BoilerSchema({ sensor }) {
     const feedColor = isDanger ? '#ef4444' : '#f59e0b'; // Red / Amber
     const returnColor = '#3b82f6'; // Blue
 
+    const formatTemp = (val) => {
+        const num = parseFloat(val || 0);
+        if (num <= -127) return "ERR"; // или "N/A"
+        return num.toFixed(1);
+    };
     return (
         <div className="relative w-full h-[400px] bg-[#0b1121] rounded-2xl border border-white/10 overflow-hidden shadow-inner flex items-center justify-center select-none group">
 
@@ -75,7 +80,7 @@ export function BoilerSchema({ sensor }) {
                     <div className="bg-black/80 backdrop-blur border border-orange-500/50 p-2 rounded-lg shadow-[0_0_15px_rgba(245,158,11,0.2)] min-w-[100px] text-center transform transition-transform hover:scale-110">
                         <div className="text-[9px] text-orange-400 uppercase font-bold mb-1 tracking-wider">Feed Temp</div>
                         <div className="text-2xl font-mono font-bold text-white flex items-center justify-center gap-1">
-                            {parseFloat(sensor.telemetry.t_out || 0).toFixed(1)}°
+                            {formatTemp(sensor.telemetry.t_out)}°
                             <Activity size={14} className="text-orange-500"/>
                         </div>
                     </div>
@@ -89,7 +94,7 @@ export function BoilerSchema({ sensor }) {
                     <div className="bg-black/80 backdrop-blur border border-blue-500/50 p-2 rounded-lg shadow-[0_0_15px_rgba(59,130,246,0.2)] min-w-[100px] text-center transform transition-transform hover:scale-110">
                         <div className="text-[9px] text-blue-400 uppercase font-bold mb-1 tracking-wider">Return Temp</div>
                         <div className="text-xl font-mono font-bold text-white">
-                            {parseFloat(sensor.telemetry.t_in || 0).toFixed(1)}°
+                            {formatTemp(sensor.telemetry.t_in)}°
                         </div>
                     </div>
                     {/* Линия к трубе */}

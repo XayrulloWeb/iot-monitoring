@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useSensorStore } from '../store/sensorStore';
 import { ArrowLeft, MapPin, AlertTriangle, CheckCircle, WifiOff, List, Download, Hash, RefreshCw, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { BoilerSchema } from '../components/schema/BoilerSchema';
-import { format, isValid } from 'date-fns'; // Импортируем isValid
+import { format, isValid } from 'date-fns';
 import { WeatherWidget } from "../components/ui/WeatherWidget.jsx";
 import * as XLSX from 'xlsx';
 
@@ -22,16 +22,24 @@ export default function DeviceDetailPage() {
 
     const sensor = sensors.find(s => s.id === id);
 
+    // --- FIX: ЛОГИКА ОПРЕДЕЛЕНИЯ СТАТУСА (-127) ---
+    // Проверяем на физический обрыв датчика (значение -127)
+    const isSensorError = sensor?.telemetry?.t_out <= -127 || sensor?.telemetry?.t_in <= -127;
+
+    // Считаем опасностью, если бэкенд прислал danger ИЛИ если мы нашли обрыв датчика
+    const isDanger = sensor?.status === 'danger' || isSensorError;
+    const isOffline = sensor?.status === 'offline';
+    // ---------------------------------------------
+
     const [isSyncing, setIsSyncing] = useState(false);
     const [page, setPage] = useState(1);
 
     // 1. Live Data (Poll every 30s)
-    // 504 ошибки игнорируем - это нормально, если сенсор не отвечает быстро
     useEffect(() => {
         if (!id) return;
-        fetchSensorLive(id).catch(() => {}); // Первый запрос сразу
+        fetchSensorLive(id).catch(() => {});
         const interval = setInterval(() => {
-            fetchSensorLive(id).catch(() => {}); // Затем каждые 30 секунд
+            fetchSensorLive(id).catch(() => {});
         }, 60000);
         return () => clearInterval(interval);
     }, [id, fetchSensorLive]);
@@ -53,9 +61,6 @@ export default function DeviceDetailPage() {
         );
     }
 
-    const isDanger = sensor.status === 'danger';
-    const isOffline = sensor.status === 'offline';
-
     const handleSync = async () => {
         setIsSyncing(true);
         await syncSensor(sensor.id);
@@ -65,7 +70,6 @@ export default function DeviceDetailPage() {
     const handleExport = () => {
         if (!sensor.history || sensor.history.length === 0) return;
         const data = sensor.history.map((log, index) => ({
-            // Проверка даты перед экспортом
             "Timestamp": log.time ? format(new Date(log.time), 'yyyy-MM-dd HH:mm:ss') : `Record ${index + 1}`,
             "Feed Temp (°C)": parseFloat(log.t_out) || 0,
             "Return Temp (°C)": parseFloat(log.t_in) || 0,
@@ -74,18 +78,17 @@ export default function DeviceDetailPage() {
         }));
         const worksheet = XLSX.utils.json_to_sheet(data);
         worksheet['!cols'] = [
-            { wch: 20 }, // Timestamp
-            { wch: 15 }, // Feed Temp
-            { wch: 15 }, // Return Temp
-            { wch: 12 }, // Delta T
-            { wch: 12 }  // Pressure
+            { wch: 20 },
+            { wch: 15 },
+            { wch: 15 },
+            { wch: 12 },
+            { wch: 12 }
         ];
         const workbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(workbook, worksheet, "History Log");
         XLSX.writeFile(workbook, `${sensor.name}_History_Page_${page}.xlsx`);
     };
 
-    // Функция безопасного форматирования даты
     const renderDate = (dateString) => {
         if (!dateString) return <span className="text-red-500/50">N/A</span>;
         const date = new Date(dateString);
@@ -107,8 +110,14 @@ export default function DeviceDetailPage() {
                 <div className="flex-1">
                     <h1 className="text-2xl font-bold text-white font-mono tracking-tight flex items-center gap-3">
                         {sensor.name}
-                        {isDanger && <span className="text-xs bg-red-500/20 text-red-500 border border-red-500/50 px-2 py-0.5 rounded animate-pulse">CRITICAL ERROR</span>}
-                        {isOffline && <span className="text-xs bg-slate-700 text-slate-300 border border-slate-600 px-2 py-0.5 rounded">OFFLINE</span>}
+                        {/* FIX: Отображение конкретной ошибки */}
+                        {isSensorError ? (
+                            <span className="text-xs bg-red-500/20 text-red-500 border border-red-500/50 px-2 py-0.5 rounded animate-pulse">SENSOR FAILURE</span>
+                        ) : isDanger ? (
+                            <span className="text-xs bg-red-500/20 text-red-500 border border-red-500/50 px-2 py-0.5 rounded animate-pulse">CRITICAL ERROR</span>
+                        ) : isOffline ? (
+                            <span className="text-xs bg-slate-700 text-slate-300 border border-slate-600 px-2 py-0.5 rounded">OFFLINE</span>
+                        ) : null}
                     </h1>
                     <div className="mt-1 flex items-center gap-4 text-xs text-slate-400 font-mono">
                          <span className="text-[11px] font-mono text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/20 flex items-center gap-1">
@@ -199,20 +208,31 @@ export default function DeviceDetailPage() {
                                         const tOut = parseFloat(log.t_out) || 0;
                                         const tIn = parseFloat(log.t_in) || 0;
                                         const delta = (tOut - tIn).toFixed(1);
-                                        const isLow = tOut < 60;
+                                        // Также можно подсветить -127 в истории
+                                        const isErrorLog = tOut <= -127 || tIn <= -127;
+                                        const isLow = tOut < 60 && !isErrorLog;
+
                                         return (
                                             <tr key={index} className="border-b border-white/5 hover:bg-white/5 transition-colors font-mono text-sm group">
                                                 <td className="py-3 px-4 text-slate-400">
                                                     {log.time ? renderDate(log.time) : <span className="text-slate-500">#{index + 1}</span>}
                                                 </td>
-                                                <td className="py-3 px-4 text-right font-bold text-amber-400">{tOut.toFixed(1)}°</td>
-                                                <td className="py-3 px-4 text-right font-bold text-blue-400">{tIn.toFixed(1)}°</td>
-                                                <td className="py-3 px-4 text-right text-slate-300">{delta}°</td>
+                                                <td className={`py-3 px-4 text-right font-bold ${isErrorLog ? 'text-red-500' : 'text-amber-400'}`}>
+                                                    {tOut <= -127 ? 'ERR' : tOut.toFixed(1) + '°'}
+                                                </td>
+                                                <td className={`py-3 px-4 text-right font-bold ${isErrorLog ? 'text-red-500' : 'text-blue-400'}`}>
+                                                    {tIn <= -127 ? 'ERR' : tIn.toFixed(1) + '°'}
+                                                </td>
+                                                <td className="py-3 px-4 text-right text-slate-300">{isErrorLog ? '-' : delta + '°'}</td>
                                                 <td className="py-3 px-4 text-right">
                                                     <span className={`text-[10px] px-2 py-0.5 rounded border font-bold ${
-                                                        isLow ? 'text-red-400 bg-red-500/10 border-red-500/20' : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+                                                        isErrorLog
+                                                            ? 'text-red-400 bg-red-500/10 border-red-500/20'
+                                                            : isLow
+                                                                ? 'text-orange-400 bg-orange-500/10 border-orange-500/20'
+                                                                : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
                                                     }`}>
-                                                        {isLow ? 'LOW TEMP' : 'NORMAL'}
+                                                        {isErrorLog ? 'SENSOR FAIL' : isLow ? 'LOW TEMP' : 'NORMAL'}
                                                     </span>
                                                 </td>
                                             </tr>
@@ -234,8 +254,16 @@ export default function DeviceDetailPage() {
                                 {isDanger ? <AlertTriangle size={32} /> : isOffline ? <WifiOff size={32}/> : <CheckCircle size={32} />}
                             </div>
                             <div>
+                                {/* FIX: Исправлено отображение текста статуса */}
                                 <div className={`text-xl font-bold font-mono ${isDanger ? 'text-red-400' : 'text-emerald-400'}`}>
-                                    {isDanger ? 'WARNING' : isOffline ? 'OFFLINE' : 'OPERATIONAL'}
+                                    {isSensorError
+                                        ? 'SENSOR FAILURE'
+                                        : isDanger
+                                            ? 'WARNING'
+                                            : isOffline
+                                                ? 'OFFLINE'
+                                                : 'OPERATIONAL'
+                                    }
                                 </div>
                                 <div className="text-xs text-slate-500 mt-1">
                                     Last Update: {format(new Date(sensor.lastUpdate), 'dd.MM.yyyy HH:mm:ss')}
